@@ -53,7 +53,7 @@ MainWindow::MainWindow(QWidget* parent)
     } else {
         qDebug() << "Failed to load stylesheet from resources";
         // Fallback: try to load from file system for development
-        QFile fallbackFile("C:\\Users\\Administrator\\source\\repos\\AnderCAD\\cad_ui\\resources\\styles.qss");
+        QFile fallbackFile("C:\\Users\\Administrator\\source\\repos\\draft\\draft\\cad_ui\\resources\\styles.qss");
         if (fallbackFile.open(QFile::ReadOnly | QFile::Text)) {
             QTextStream fallbackStream(&fallbackFile);
             QString fallbackStyle = fallbackStream.readAll();
