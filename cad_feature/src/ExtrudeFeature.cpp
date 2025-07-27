@@ -7,6 +7,9 @@
 #include <TopoDS_Edge.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #pragma execution_character_set("utf-8")
+#include <Geom_Circle.hxx>
+#include <gp_Ax2.hxx>
+
 
 namespace cad_feature {
 
@@ -115,49 +118,80 @@ cad_core::ShapePtr ExtrudeFeature::ExtrudeSketch() const {
     }
 
     try {
-        // 1. 将草图中的所有线段 (SketchLine) 转换为 OpenCASCADE 的边 (TopoDS_Edge)
         BRepBuilderAPI_MakeWire wireMaker;
         const auto& elements = m_sketch->GetElements();
+
+        // 处理所有草图元素
         for (const auto& elem : elements) {
             if (elem->GetType() == cad_sketch::SketchElementType::Line) {
                 auto sketchLine = std::static_pointer_cast<cad_sketch::SketchLine>(elem);
                 const auto& startPnt = sketchLine->GetStartPoint()->GetPoint().GetOCCTPoint();
                 const auto& endPnt = sketchLine->GetEndPoint()->GetPoint().GetOCCTPoint();
-
-                // 草图坐标是2D的(x,y)，我们需要把它转换回3D空间
                 TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(startPnt, endPnt).Edge();
                 wireMaker.Add(edge);
             }
+            else if (elem->GetType() == cad_sketch::SketchElementType::Circle) {
+                // 添加圆形处理
+                auto sketchCircle = std::static_pointer_cast<cad_sketch::SketchCircle>(elem);
+                const auto& center = sketchCircle->GetCenter()->GetPoint().GetOCCTPoint();
+                double radius = sketchCircle->GetRadius();
+
+                // 创建圆形边
+                gp_Ax2 axis(center, gp_Dir(0, 0, 1)); // 假设在XY平面
+                Handle(Geom_Circle) geomCircle = new Geom_Circle(axis, radius);
+                TopoDS_Edge circleEdge = BRepBuilderAPI_MakeEdge(geomCircle).Edge();
+                wireMaker.Add(circleEdge);
+            }
         }
 
-        // 2. 从边集合创建成一个封闭的线框 (Wire)
-        TopoDS_Wire sketchWire = wireMaker.Wire();
-        if (sketchWire.IsNull()) {
-            return nullptr; // 如果无法形成线框，则失败
+        // 对于单个圆，直接创建面
+        if (elements.size() == 1 && elements[0]->GetType() == cad_sketch::SketchElementType::Circle) {
+            auto sketchCircle = std::static_pointer_cast<cad_sketch::SketchCircle>(elements[0]);
+            const auto& center = sketchCircle->GetCenter()->GetPoint().GetOCCTPoint();
+            double radius = sketchCircle->GetRadius();
+
+            // 创建圆形线框
+            gp_Ax2 axis(center, gp_Dir(0, 0, 1));
+            Handle(Geom_Circle) geomCircle = new Geom_Circle(axis, radius);
+            TopoDS_Edge circleEdge = BRepBuilderAPI_MakeEdge(geomCircle).Edge();
+            TopoDS_Wire circleWire = BRepBuilderAPI_MakeWire(circleEdge).Wire();
+
+            // 创建圆形面
+            TopoDS_Face circleFace = BRepBuilderAPI_MakeFace(circleWire).Face();
+
+            // 执行拉伸
+            double distance = GetDistance();
+            gp_Vec extrudeVector(0, 0, distance);
+            BRepPrimAPI_MakePrism prismMaker(circleFace, extrudeVector);
+            prismMaker.Build();
+
+            if (prismMaker.IsDone()) {
+                return std::make_shared<cad_core::Shape>(prismMaker.Shape());
+            }
         }
+        else {
+            // 处理多个元素组成的轮廓
+            TopoDS_Wire sketchWire = wireMaker.Wire();
+            if (sketchWire.IsNull()) {
+                return nullptr;
+            }
 
-        // 3. 从封闭的线框创建一个面 (Face)
-        TopoDS_Face sketchFace = BRepBuilderAPI_MakeFace(sketchWire).Face();
-        if (sketchFace.IsNull()) {
-            return nullptr; // 如果不是封闭轮廓，则失败
+            TopoDS_Face sketchFace = BRepBuilderAPI_MakeFace(sketchWire).Face();
+            if (sketchFace.IsNull()) {
+                return nullptr;
+            }
+
+            double distance = GetDistance();
+            gp_Vec extrudeVector(0, 0, distance);
+            BRepPrimAPI_MakePrism prismMaker(sketchFace, extrudeVector);
+            prismMaker.Build();
+
+            if (prismMaker.IsDone()) {
+                return std::make_shared<cad_core::Shape>(prismMaker.Shape());
+            }
         }
-
-        // 4. 定义拉伸向量
-        double distance = GetDistance();
-        gp_Vec extrudeVector(0, 0, distance); // 暂时硬编码为沿Z轴拉伸
-
-        // 5. 执行拉伸操作 
-        BRepPrimAPI_MakePrism prismMaker(sketchFace, extrudeVector);
-        prismMaker.Build();
-
-        if (prismMaker.IsDone()) {
-            // 6. 返回拉伸成功后的新三维形状
-            return std::make_shared<cad_core::Shape>(prismMaker.Shape());
-        }
-
     }
     catch (const Standard_Failure& e) {
-        // 捕获OpenCASCADE的异常
         return nullptr;
     }
 

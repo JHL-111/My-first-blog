@@ -53,7 +53,7 @@ MainWindow::MainWindow(QWidget* parent)
     } else {
         qDebug() << "Failed to load stylesheet from resources";
         // Fallback: try to load from file system for development
-        QFile fallbackFile("C:\\Users\\Administrator\\source\\repos\\draft\\draft\\cad_ui\\resources\\styles.qss");
+        QFile fallbackFile("C:\\Users\\Administrator\\source\\repos\\firstversion\\My-first-blog\\cad_ui\\resources\\styles.qss");
         if (fallbackFile.open(QFile::ReadOnly | QFile::Text)) {
             QTextStream fallbackStream(&fallbackFile);
             QString fallbackStyle = fallbackStream.readAll();
@@ -282,6 +282,11 @@ void MainWindow::CreateActions() {
     m_sketchLineAction->setStatusTip("Draw line in sketch mode");
     m_sketchLineAction->setEnabled(false);  // 初始禁用
 
+    m_sketchCircleAction = new QAction("&Circle", this);
+    m_sketchCircleAction->setShortcut(QKeySequence("C"));
+    m_sketchCircleAction->setStatusTip("Draw circle in sketch mode");
+    m_sketchCircleAction->setEnabled(false);  // 初始禁用
+
     // Selection mode now handled by combo box - old actions commented out for testing
     
     // Selection mode group now handled by combo box
@@ -364,6 +369,7 @@ void MainWindow::CreateMenus() {
     sketchMenu->addAction(m_exitSketchAction);
     sketchMenu->addSeparator();
     sketchMenu->addAction(m_sketchRectangleAction);
+    sketchMenu->addAction(m_sketchCircleAction);
     
     // Selection menu - now handled by combo box in toolbar
     
@@ -717,6 +723,11 @@ void MainWindow::CreateToolBars() {
     lineBtn->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
     sketchToolsButtonsLayout->addWidget(lineBtn);
 
+    QToolButton* circleBtn = new QToolButton();
+    circleBtn->setDefaultAction(m_sketchCircleAction);
+    circleBtn->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+    sketchToolsButtonsLayout->addWidget(circleBtn);
+
     sketchToolsLayout->addLayout(sketchToolsButtonsLayout);
     sketchLayout->addWidget(sketchToolsFrame);
     
@@ -810,7 +821,8 @@ void MainWindow::ConnectSignals() {
     connect(m_exitSketchAction, &QAction::triggered, this, &MainWindow::OnExitSketchMode);
     connect(m_sketchRectangleAction, &QAction::triggered, this, &MainWindow::OnSketchRectangleTool);
     connect(m_sketchLineAction, &QAction::triggered, this, &MainWindow::OnSketchLineTool);
-    
+    connect(m_sketchCircleAction, &QAction::triggered, this, &MainWindow::OnSketchCircleTool);
+
     // Selection mode combo box connected in CreateSelectionModeCombo()
     
     // Theme actions
@@ -1174,6 +1186,16 @@ void MainWindow::OnCreateExtrude() {
     if (!m_lastCompletedSketch || m_lastCompletedSketch->IsEmpty()) {
         QMessageBox::warning(this, "拉伸错误", "没有可用于拉伸的草图。请先绘制一个封闭的草图并退出草图模式。");
         return;
+    }
+
+    // 添加调试信息
+    qDebug() << "Sketch element count:" << m_lastCompletedSketch->GetElementCount();
+    for (const auto& elem : m_lastCompletedSketch->GetElements()) {
+        if (elem->GetType() == cad_sketch::SketchElementType::Circle) {
+            auto circle = std::static_pointer_cast<cad_sketch::SketchCircle>(elem);
+            qDebug() << "Circle center:" << circle->GetCenter()->GetX() << "," << circle->GetCenter()->GetY();
+            qDebug() << "Circle radius:" << circle->GetRadius();
+        }
     }
 
     // 2. 弹出一个对话框，让用户输入拉伸距离
@@ -2188,6 +2210,15 @@ void MainWindow::OnSketchLineTool() {
     statusBar()->showMessage("直线工具已激活 - 点击并拖拽创建直线");
 }
 
+void MainWindow::OnSketchCircleTool() {
+    if (!m_viewer || !m_viewer->IsInSketchMode()) {
+        return;
+    }
+
+    m_viewer->StartCircleTool();
+    statusBar()->showMessage("圆形工具已激活 - 点击设置圆心，拖拽设置半径");
+}
+
 void MainWindow::OnFaceSelected(const TopoDS_Face& face) {
     if (!m_waitingForFaceSelection) {
         return;
@@ -2264,6 +2295,7 @@ void MainWindow::OnSketchModeEntered() {
     m_exitSketchAction->setEnabled(true);
     m_sketchRectangleAction->setEnabled(true);
     m_sketchLineAction->setEnabled(true);
+	m_sketchCircleAction->setEnabled(true);
     
     // Reset selection mode
     m_viewer->SetSelectionMode(0);  // Shape selection mode
@@ -2279,6 +2311,7 @@ void MainWindow::OnSketchModeExited() {
     m_exitSketchAction->setEnabled(false);
     m_sketchRectangleAction->setEnabled(false);
     m_sketchLineAction->setEnabled(false);
+	m_sketchCircleAction->setEnabled(false);
     
     // Reset any waiting states
     m_waitingForFaceSelection = false;

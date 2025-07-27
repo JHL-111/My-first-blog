@@ -104,7 +104,36 @@ private:
     gp_Pnt ScreenToSketchPlane(const QPoint& screenPoint);
 };
 
+class SketchCircleTool : public QObject {
+    Q_OBJECT
 
+public:
+    explicit SketchCircleTool(QObject* parent = nullptr);
+
+    void StartDrawing(const QPoint& centerPoint);
+    void UpdateDrawing(const QPoint& currentPoint);
+    void FinishDrawing(const QPoint& endPoint);
+    void CancelDrawing();
+
+    bool IsDrawing() const { return m_isDrawing; }
+
+    void SetSketchPlane(const gp_Pln& plane);
+    void SetView(Handle(V3d_View) view);
+
+signals:
+    void circleCreated(const cad_sketch::SketchCirclePtr& circle);
+    void previewUpdated(const cad_sketch::SketchCirclePtr& previewCircle);
+    void drawingCancelled();
+
+private:
+    bool m_isDrawing;
+    gp_Pnt m_centerPoint3d;
+    gp_Pln m_sketchPlane;
+    Handle(V3d_View) m_view;
+
+    gp_Pnt ScreenToSketchPlane(const QPoint& screenPoint);
+    double CalculateRadius(const gp_Pnt& center, const gp_Pnt& point);
+};
 
 /**
  * @class SketchMode
@@ -138,6 +167,8 @@ public:
     void HandleMouseRelease(QMouseEvent* event);
     void HandleKeyPress(QKeyEvent* event);
 
+	void StartCircleTool();
+
 signals:
     void sketchModeEntered();
     void sketchModeExited();
@@ -147,6 +178,8 @@ signals:
 private slots:
     void OnRectangleCreated(const std::vector<cad_sketch::SketchLinePtr>& lines);
     void OnLineCreated(const cad_sketch::SketchLinePtr& line);
+    void OnCircleCreated(const cad_sketch::SketchCirclePtr& circle);
+    void UpdateCirclePreview(const cad_sketch::SketchCirclePtr& previewCircle);
     void OnDrawingCancelled();
 
 private:
@@ -166,16 +199,18 @@ private:
     double m_savedScale;
     
     // 绘制工具
-    enum class ActiveTool { None, Rectangle, Line }; 
+    enum class ActiveTool { None, Rectangle, Line, Circle }; 
     ActiveTool m_activeTool;                       
     std::unique_ptr<SketchRectangleTool> m_rectangleTool;
-    std::unique_ptr<SketchLineTool> m_lineTool;    
+    std::unique_ptr<SketchLineTool> m_lineTool;
+	std::unique_ptr<SketchCircleTool> m_circleTool;
     
     // 私有方法
     void SetupSketchPlane(const TopoDS_Face& face);
     void SetupSketchView();
     void RestoreView();
     void CreateSketchCoordinateSystem();
+    void DisplaySketchCircle(const cad_sketch::SketchCirclePtr& circle);
     gp_Pln ExtractPlaneFromFace(const TopoDS_Face& face);
 
     // 用于存储草图元素和其对应的可显示对象之间的映射关系
@@ -184,6 +219,7 @@ private:
     // 用于存储正在绘制的预览图形，方便快速清除
     std::vector<Handle(AIS_Shape)> m_previewElements;
     TopoDS_Edge ConvertLineToEdge(const cad_sketch::SketchLinePtr& line) const;
+    TopoDS_Edge ConvertCircleToEdge(const cad_sketch::SketchCirclePtr& circle) const;
 
     // 显示一个草图元素
     void DisplaySketchElement(const cad_sketch::SketchElementPtr& element);

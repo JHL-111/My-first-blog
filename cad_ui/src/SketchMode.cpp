@@ -19,6 +19,9 @@
 #include <Quantity_Color.hxx>
 #include <Aspect_TypeOfLine.hxx>
 #include <Graphic3d_Camera.hxx>
+#include <Geom_Circle.hxx>
+#include <gp_Ax2.hxx>
+
 
 namespace cad_ui {
 
@@ -181,6 +184,8 @@ std::vector<cad_sketch::SketchLinePtr> SketchRectangleTool::CreateRectangleLines
 
 
 // =============================================================================
+// SketchLineTool Implementation
+// =============================================================================
 SketchLineTool::SketchLineTool(QObject* parent)
     : QObject(parent), m_isDrawing(false) {
     m_sketchPlane = gp_Pln(gp_Pnt(1.0e+100, 0, 0), gp_Dir(0, 0, 1));
@@ -247,8 +252,95 @@ gp_Pnt SketchLineTool::ScreenToSketchPlane(const QPoint& screenPoint) {
 }
 
 // =============================================================================
-// ^^^^^^^^^^^^^^  SketchLineTool Implementation End ^^^^^^^^^^^^^^
+// SketchCircleTool Implementation
 // =============================================================================
+
+SketchCircleTool::SketchCircleTool(QObject* parent)
+    : QObject(parent), m_isDrawing(false) {
+}
+
+void SketchCircleTool::StartDrawing(const QPoint& centerPoint) {
+    m_centerPoint3d = ScreenToSketchPlane(centerPoint);
+    m_isDrawing = true;
+    qDebug() << "Circle tool: Started drawing at center" << centerPoint;
+}
+
+void SketchCircleTool::UpdateDrawing(const QPoint& currentPoint) {
+    if (!m_isDrawing) return;
+
+    gp_Pnt currentPoint3d = ScreenToSketchPlane(currentPoint);
+    double radius = CalculateRadius(m_centerPoint3d, currentPoint3d);
+
+    if (radius > 0.1) { // 避免创建太小的圆
+        auto center = std::make_shared<cad_sketch::SketchPoint>(m_centerPoint3d.X(), m_centerPoint3d.Y());
+        auto previewCircle = std::make_shared<cad_sketch::SketchCircle>(center, radius);
+        emit previewUpdated(previewCircle);
+    }
+}
+
+void SketchCircleTool::FinishDrawing(const QPoint& endPoint) {
+    if (!m_isDrawing) return;
+    m_isDrawing = false;
+
+    gp_Pnt endPoint3d = ScreenToSketchPlane(endPoint);
+    double radius = CalculateRadius(m_centerPoint3d, endPoint3d);
+
+    if (radius > 0.1) { // 避免创建太小的圆
+        auto center = std::make_shared<cad_sketch::SketchPoint>(m_centerPoint3d.X(), m_centerPoint3d.Y());
+        auto circle = std::make_shared<cad_sketch::SketchCircle>(center, radius);
+        emit circleCreated(circle);
+        qDebug() << "Circle created with radius:" << radius;
+    }
+    else {
+        emit drawingCancelled();
+        qDebug() << "Circle too small, cancelled";
+    }
+}
+
+void SketchCircleTool::CancelDrawing() {
+    if (!m_isDrawing) return;
+    m_isDrawing = false;
+    emit drawingCancelled();
+}
+
+void SketchCircleTool::SetSketchPlane(const gp_Pln& plane) {
+    m_sketchPlane = plane;
+}
+
+void SketchCircleTool::SetView(Handle(V3d_View) view) {
+    m_view = view;
+}
+
+gp_Pnt SketchCircleTool::ScreenToSketchPlane(const QPoint& screenPoint) {
+    if (m_view.IsNull()) {
+        return gp_Pnt(0, 0, 0);
+    }
+
+    // 使用与其他工具相同的投影方法
+    Standard_Real Xp, Yp, Zp, Xv, Yv, Zv;
+    m_view->Convert(screenPoint.x(), screenPoint.y(), Xp, Yp, Zp);
+    m_view->Proj(Xv, Yv, Zv);
+
+    gp_Lin line(gp_Pnt(Xp, Yp, Zp), gp_Dir(Xv, Yv, Zv));
+
+    Handle(Geom_Plane) plane = new Geom_Plane(m_sketchPlane);
+    GeomAPI_IntCS intCS;
+    intCS.Perform(new Geom_Line(line), plane);
+
+    if (intCS.IsDone() && intCS.NbPoints() > 0) {
+        gp_Pnt result = intCS.Point(1);
+        Standard_Real u, v;
+        ElSLib::Parameters(m_sketchPlane, result, u, v);
+        return gp_Pnt(u, v, 0);
+    }
+
+    return gp_Pnt(0, 0, 0);
+}
+
+double SketchCircleTool::CalculateRadius(const gp_Pnt& center, const gp_Pnt& point) {
+    return center.Distance(point);
+}
+
 
 
 // =============================================================================
@@ -261,6 +353,7 @@ SketchMode::SketchMode(QtOccView* viewer, QObject* parent)
     // 创建绘制工具
     m_rectangleTool = std::make_unique<SketchRectangleTool>(this);
 	m_lineTool = std::make_unique<SketchLineTool>(this);
+	m_circleTool = std::make_unique<SketchCircleTool>(this);
 
     // 连接信号槽
     connect(m_rectangleTool.get(), &SketchRectangleTool::rectangleCreated, this, &SketchMode::OnRectangleCreated);
@@ -270,6 +363,10 @@ SketchMode::SketchMode(QtOccView* viewer, QObject* parent)
     connect(m_lineTool.get(), &SketchLineTool::lineCreated, this, &SketchMode::OnLineCreated);
     connect(m_lineTool.get(), &SketchLineTool::previewUpdated, this, &SketchMode::UpdatePreview);
     connect(m_lineTool.get(), &SketchLineTool::drawingCancelled, this, &SketchMode::OnDrawingCancelled);
+
+    connect(m_circleTool.get(), &SketchCircleTool::circleCreated, this, &SketchMode::OnCircleCreated);
+    connect(m_circleTool.get(), &SketchCircleTool::previewUpdated, this, &SketchMode::UpdateCirclePreview);
+    connect(m_circleTool.get(), &SketchCircleTool::drawingCancelled, this, &SketchMode::OnDrawingCancelled);
 }
 
 bool SketchMode::EnterSketchMode(const TopoDS_Face& face) {
@@ -328,6 +425,8 @@ bool SketchMode::EnterSketchMode(const TopoDS_Face& face) {
         m_rectangleTool->SetView(m_viewer->GetView());
 		m_lineTool->SetSketchPlane(m_sketchPlane);
 		m_lineTool->SetView(m_viewer->GetView());
+        m_circleTool->SetSketchPlane(m_sketchPlane);  
+        m_circleTool->SetView(m_viewer->GetView());   
 
         m_isActive = true;
         
@@ -393,14 +492,29 @@ void SketchMode::StartLineTool() {
     qDebug() << "Started line tool";
 }
 
+void SketchMode::StartCircleTool() {
+    if (!m_isActive) {
+        return;
+    }
+
+    StopCurrentTool();
+    m_activeTool = ActiveTool::Circle;
+    emit statusMessageChanged("圆形工具 - 点击设置圆心，然后拖拽设置半径");
+
+    qDebug() << "Started circle tool";
+}
+
 void SketchMode::StopCurrentTool() {
-    if (m_rectangleTool && m_rectangleTool->IsDrawing()) {
+    if(m_rectangleTool && m_rectangleTool->IsDrawing()) {
         m_rectangleTool->CancelDrawing();
     }
     if (m_lineTool && m_lineTool->IsDrawing()) {
         m_lineTool->CancelDrawing();
-		m_activeTool = ActiveTool::None; 
     }
+    if (m_circleTool && m_circleTool->IsDrawing()) {  
+        m_circleTool->CancelDrawing();
+    }
+    m_activeTool = ActiveTool::None;
 }
 
 void SketchMode::HandleMousePress(QMouseEvent* event) {
@@ -411,6 +525,9 @@ void SketchMode::HandleMousePress(QMouseEvent* event) {
     }
     else if (m_activeTool == ActiveTool::Line) { 
         m_lineTool->StartDrawing(event->pos());
+    }
+    else if (m_activeTool == ActiveTool::Circle) {  
+        m_circleTool->StartDrawing(event->pos());
     }
 }
 
@@ -423,6 +540,9 @@ void SketchMode::HandleMouseMove(QMouseEvent* event) {
     else if (m_activeTool == ActiveTool::Line) { 
         m_lineTool->UpdateDrawing(event->pos());
     }
+    else if (m_activeTool == ActiveTool::Circle) { 
+        m_circleTool->UpdateDrawing(event->pos());
+    }
 }
 
 void SketchMode::HandleMouseRelease(QMouseEvent* event) {
@@ -433,6 +553,9 @@ void SketchMode::HandleMouseRelease(QMouseEvent* event) {
     }
     else if (m_activeTool == ActiveTool::Line) { 
         m_lineTool->FinishDrawing(event->pos());
+    }
+    else if (m_activeTool == ActiveTool::Circle) {  
+        m_circleTool->FinishDrawing(event->pos());
     }
 }
 
@@ -481,6 +604,43 @@ void SketchMode::OnLineCreated(const cad_sketch::SketchLinePtr& line) {
     emit sketchElementCreated(line);
 
     emit statusMessageChanged("创建了直线");
+}
+
+void SketchMode::OnCircleCreated(const cad_sketch::SketchCirclePtr& circle) {
+    if (!m_currentSketch) {
+        return;
+    }
+
+    ClearPreviewDisplay();
+
+    // 将圆添加到草图中
+    m_currentSketch->AddElement(circle);
+    DisplaySketchCircle(circle);
+    emit sketchElementCreated(circle);
+
+    emit statusMessageChanged("创建了圆形");
+    qDebug() << "Added circle to sketch";
+}
+
+void SketchMode::UpdateCirclePreview(const cad_sketch::SketchCirclePtr& previewCircle) {
+    if (!m_viewer || m_viewer->GetContext().IsNull()) return;
+
+    ClearPreviewDisplay();
+
+    if (previewCircle) {
+        TopoDS_Edge edge = ConvertCircleToEdge(previewCircle);
+        if (!edge.IsNull()) {
+            auto aisShape = new AIS_Shape(edge);
+            aisShape->Attributes()->SetLineAspect(
+                new Prs3d_LineAspect(Quantity_NOC_BLUE1, Aspect_TOL_DOT, 2.0));
+            aisShape->SetZLayer(Graphic3d_ZLayerId_Topmost);
+
+            m_previewElements.push_back(aisShape);
+            m_viewer->GetContext()->Display(aisShape, Standard_False);
+        }
+    }
+
+    m_viewer->GetView()->Redraw();
 }
 
 void SketchMode::OnDrawingCancelled() {
@@ -640,6 +800,49 @@ TopoDS_Edge SketchMode::ConvertLineToEdge(const cad_sketch::SketchLinePtr& line)
     return BRepBuilderAPI_MakeEdge(p1, p2).Edge();
 }
 
+TopoDS_Edge SketchMode::ConvertCircleToEdge(const cad_sketch::SketchCirclePtr& circle) const {
+    if (!circle || !circle->GetCenter()) {
+        return TopoDS_Edge();
+    }
+
+    // 获取圆心的2D坐标
+    double centerX = circle->GetCenter()->GetX();
+    double centerY = circle->GetCenter()->GetY();
+    double radius = circle->GetRadius();
+
+    // 将2D坐标转换为草图平面上的3D坐标
+    gp_Pnt center3D = ElSLib::Value(centerX, centerY, m_sketchPlane);
+
+    // 创建圆的轴（使用草图平面的法向）
+    gp_Ax2 axis(center3D, m_sketchPlane.Axis().Direction());
+
+    // 创建圆
+    Handle(Geom_Circle) geomCircle = new Geom_Circle(axis, radius);
+
+    // 创建完整的圆边
+    return BRepBuilderAPI_MakeEdge(geomCircle).Edge();
+}
+
+void SketchMode::DisplaySketchCircle(const cad_sketch::SketchCirclePtr& circle) {
+    if (!m_viewer || m_viewer->GetContext().IsNull() || !circle) {
+        return;
+    }
+
+    TopoDS_Edge edge = ConvertCircleToEdge(circle);
+    if (!edge.IsNull()) {
+        auto aisShape = new AIS_Shape(edge);
+        aisShape->Attributes()->SetLineAspect(
+            new Prs3d_LineAspect(Quantity_NOC_BLACK, Aspect_TOL_SOLID, 2.0));
+        aisShape->SetZLayer(Graphic3d_ZLayerId_Topmost);
+
+        m_displayedElements[circle] = aisShape;
+        m_viewer->GetContext()->Display(aisShape, Standard_False);
+    }
+
+    m_viewer->GetContext()->UpdateCurrentViewer();
+    m_viewer->GetView()->Redraw();
+}
+
 // 清除预览图形
 void SketchMode::ClearPreviewDisplay() {
     if (!m_viewer || m_viewer->GetContext().IsNull()) return;
@@ -683,7 +886,8 @@ void SketchMode::DisplaySketchElement(const cad_sketch::SketchElementPtr& elemen
     if (!m_viewer || m_viewer->GetContext().IsNull() || !element) {
         return;
     }
-    // 处理不同类型的草图元素（目前只有直线）
+
+    // 处理不同类型的草图元素
     if (element->GetType() == cad_sketch::SketchElementType::Line) {
         auto line = std::dynamic_pointer_cast<cad_sketch::SketchLine>(element);
 
@@ -702,7 +906,11 @@ void SketchMode::DisplaySketchElement(const cad_sketch::SketchElementPtr& elemen
         // 将显示对象添加到3D场景中，但不立即重绘（Standard_False）
         m_viewer->GetContext()->Display(aisShape, Standard_False);
     }
-    // 未来可以在这里添加对 Circle, Arc 等其他类型的显示支持\
+    else if (element->GetType() == cad_sketch::SketchElementType::Circle) {  // 添加圆形处理
+        auto circle = std::dynamic_pointer_cast<cad_sketch::SketchCircle>(element);
+        DisplaySketchCircle(circle);
+    }
+    // 未来可以在这里添加对 Arc 等其他类型的显示支持
 
     m_viewer->GetContext()->UpdateCurrentViewer();
     m_viewer->GetView()->Redraw();
