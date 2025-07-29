@@ -2,6 +2,7 @@
 
 #include "Feature.h"
 #include "cad_sketch/Sketch.h"
+#include <gp_Pln.hxx>
 
 namespace cad_feature {
 
@@ -14,7 +15,8 @@ public:
     // Sketch operations
     void SetSketch(const cad_sketch::SketchPtr& sketch);
     const cad_sketch::SketchPtr& GetSketch() const;
-    
+    void SetSketchPlane(const gp_Pln& plane);
+
     // Extrude parameters
     void SetDistance(double distance);
     double GetDistance() const;
@@ -35,7 +37,7 @@ public:
 
 private:
     cad_sketch::SketchPtr m_sketch;
-    
+    gp_Pln m_sketchPlane;
     bool IsSketchValid() const;
     cad_core::ShapePtr ExtrudeSketch() const;
 };

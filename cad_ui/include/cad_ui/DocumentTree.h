@@ -7,6 +7,7 @@
 #include <QAction>
 #include "cad_core/Shape.h"
 #include "cad_feature/Feature.h"
+#include "cad_sketch/Sketch.h"
 
 namespace cad_ui {
 
@@ -21,11 +22,21 @@ public:
     void RemoveShape(const cad_core::ShapePtr& shape);
     void AddFeature(const cad_feature::FeaturePtr& feature);
     void RemoveFeature(const cad_feature::FeaturePtr& feature);
+    void AddSketch(const cad_sketch::SketchPtr& sketch);
+    void RemoveSketch(const cad_sketch::SketchPtr& sketch);
+    int GetSketchCount() const;
     void Clear();
 
 signals:
     void ShapeSelected(const cad_core::ShapePtr& shape);
     void FeatureSelected(const cad_feature::FeaturePtr& feature);
+    void SketchSelected(const cad_sketch::SketchPtr& sketch);
+    // 请求删除一个几何体 (Shape)
+    void shapeDeleteRequested(const cad_core::ShapePtr& shape);
+    // 请求删除一个特征 (Feature)
+    void featureDeleteRequested(const cad_feature::FeaturePtr& feature);
+    // 请求删除一个草图 (Sketch)
+    void sketchDeleteRequested(const cad_sketch::SketchPtr& sketch);
 
 protected:
     void contextMenuEvent(QContextMenuEvent* event) override;
@@ -44,7 +55,8 @@ private:
     QAction* m_deleteAction;
     QAction* m_renameAction;
     QAction* m_toggleVisibilityAction;
-    
+    QTreeWidgetItem* m_sketchesRoot;
+
     void CreateContextMenu();
     void SetupTree();
 };

@@ -1,6 +1,8 @@
 ﻿#include "cad_ui/MainWindow.h"
+#include "cad_ui/SweepFeatureDialog.h" 
 #include "cad_ui/ExportDialog.h"
 #include "cad_ui/AboutDialog.h"
+#include "cad_ui/DocumentTree.h"
 #include "cad_ui/CreatePrimitiveDialog.h"
 #include "cad_core/CreateBoxCommand.h"
 #include "cad_core/CreateCylinderCommand.h"
@@ -12,6 +14,7 @@
 #include "cad_core/FilletChamferOperations.h"
 #include "cad_core/SelectionManager.h"
 #include "cad_feature/ExtrudeFeature.h"
+#include "cad_feature/SweepFeature.h"
 #include <TopoDS.hxx>
 
 #include <QApplication>
@@ -239,6 +242,15 @@ void MainWindow::CreateActions() {
     
     m_createExtrudeAction = new QAction("Create &Extrude", this);
     m_createExtrudeAction->setStatusTip("Create an extrude feature");
+
+    m_createRevolveAction = new QAction("Create &Revolve", this);
+    m_createRevolveAction->setStatusTip("Create a revolve feature");
+
+    m_createSweepAction = new QAction("Create &Sweep", this);
+    m_createSweepAction->setStatusTip("Create a sweep feature");
+
+    m_createLoftAction = new QAction("Create &Loft", this);
+    m_createLoftAction->setStatusTip("Create a loft feature");
     
     // Boolean operations
     m_booleanUnionAction = new QAction("&Union", this);
@@ -349,6 +361,9 @@ void MainWindow::CreateMenus() {
     createMenu->addAction(m_createTorusAction);
     createMenu->addSeparator();
     createMenu->addAction(m_createExtrudeAction);
+    createMenu->addAction(m_createRevolveAction);
+    createMenu->addAction(m_createSweepAction);
+    createMenu->addAction(m_createLoftAction);
     
     // Boolean menu
     QMenu* booleanMenu = menuBar()->addMenu("&Boolean");
@@ -531,6 +546,11 @@ void MainWindow::CreateToolBars() {
     extrudeBtn->setDefaultAction(m_createExtrudeAction);
     extrudeBtn->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
     featuresButtonsLayout->addWidget(extrudeBtn);
+
+    QToolButton* sweepBtn = new QToolButton();
+    sweepBtn->setDefaultAction(m_createSweepAction);
+    sweepBtn->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+    featuresButtonsLayout->addWidget(sweepBtn);
     
     featuresLayout->addLayout(featuresButtonsLayout);
     designLayout->addWidget(featuresFrame);
@@ -803,7 +823,8 @@ void MainWindow::ConnectSignals() {
     connect(m_createSphereAction, &QAction::triggered, this, &MainWindow::OnCreateSphere);
     connect(m_createTorusAction, &QAction::triggered, this, &MainWindow::OnCreateTorus);
     connect(m_createExtrudeAction, &QAction::triggered, this, &MainWindow::OnCreateExtrude);
-    
+    connect(m_createSweepAction, &QAction::triggered, this, &MainWindow::OnCreateSweep);
+
     // Boolean actions
     connect(m_booleanUnionAction, &QAction::triggered, this, &MainWindow::OnBooleanUnion);
     connect(m_booleanIntersectionAction, &QAction::triggered, this, &MainWindow::OnBooleanIntersection);
@@ -822,6 +843,7 @@ void MainWindow::ConnectSignals() {
     connect(m_sketchRectangleAction, &QAction::triggered, this, &MainWindow::OnSketchRectangleTool);
     connect(m_sketchLineAction, &QAction::triggered, this, &MainWindow::OnSketchLineTool);
     connect(m_sketchCircleAction, &QAction::triggered, this, &MainWindow::OnSketchCircleTool);
+    
 
     // Selection mode combo box connected in CreateSelectionModeCombo()
     
@@ -847,6 +869,12 @@ void MainWindow::ConnectSignals() {
     // Document tree signals for selection synchronization
     connect(m_documentTree, &DocumentTree::ShapeSelected, this, &MainWindow::OnDocumentTreeShapeSelected);
     connect(m_documentTree, &DocumentTree::FeatureSelected, this, &MainWindow::OnDocumentTreeFeatureSelected);
+    connect(m_documentTree, &DocumentTree::SketchSelected, this, &MainWindow::onSketchSelectedFromTree);
+
+    connect(m_documentTree, &DocumentTree::shapeDeleteRequested, this, &MainWindow::onDeleteShapeRequested);
+    connect(m_documentTree, &DocumentTree::featureDeleteRequested, this, &MainWindow::onDeleteFeatureRequested);
+    connect(m_documentTree, &DocumentTree::sketchDeleteRequested, this, &MainWindow::onDeleteSketchRequested);
+
 }
 
 void MainWindow::UpdateActions() {
@@ -1305,8 +1333,38 @@ void MainWindow::OnCreateRevolve() {
 }
 
 void MainWindow::OnCreateSweep() {
-    QMessageBox::information(this, "Create Sweep", "Sweep feature creation not implemented yet");
+    // 步骤 1: 进行前置条件检查 (模仿拉伸错误提示)
+    // 我们检查文档树中的草图数量是否少于2
+    if (m_documentTree->GetSketchCount() < 2) {
+        QMessageBox::warning(this, "扫掠错误",
+            "没有足够的可用于扫掠的草图。\n\n"
+            "请确保您已经创建并完成了至少两个草图：\n"
+            "  • 一个作为截面轮廓 (Profile)\n"
+            "  • 一个作为行进路径 (Path)");
+        return; // 条件不满足，提前返回
+    }
+
+    // 步骤 2: 如果检查通过，再创建并显示对话框
+    if (m_currentSweepDialog) {
+        m_currentSweepDialog->raise();
+        m_currentSweepDialog->activateWindow();
+        return;
+    }
+
+    m_currentSweepDialog = new SweepFeatureDialog(this);
+
+    connect(m_currentSweepDialog, &SweepFeatureDialog::operationRequested,
+        this, &MainWindow::OnSweepOperationRequested);
+    connect(m_currentSweepDialog, &SweepFeatureDialog::selectionModeChanged,
+        this, &MainWindow::OnSelectionModeChanged);
+    connect(m_currentSweepDialog, &QDialog::finished, this, [this](int result) {
+        m_currentSweepDialog->deleteLater();
+        m_currentSweepDialog = nullptr;
+        });
+
+    m_currentSweepDialog->show();
 }
+
 
 void MainWindow::OnCreateLoft() {
     QMessageBox::information(this, "Create Loft", "Loft feature creation not implemented yet");
@@ -2189,8 +2247,11 @@ void MainWindow::OnExitSketchMode() {
     // 如果草图有效，则启用拉伸按钮
     if (m_lastCompletedSketch && !m_lastCompletedSketch->IsEmpty()) {
         m_createExtrudeAction->setEnabled(true);
+        m_documentTree->AddSketch(m_lastCompletedSketch);
+   
     }
 }
+
 
 void MainWindow::OnSketchRectangleTool() {
     if (!m_viewer || !m_viewer->IsInSketchMode()) {
@@ -2319,6 +2380,98 @@ void MainWindow::OnSketchModeExited() {
     statusBar()->showMessage("已退出草图模式");
     
     qDebug() << "Sketch mode exited, UI updated";
+}
+
+// 这个函数是“桥梁”，负责将文档树的选择事件传递给当前打开的扫掠对话框
+void MainWindow::onSketchSelectedFromTree(const cad_sketch::SketchPtr& sketch) {
+    if (m_currentSweepDialog) {
+        m_currentSweepDialog->onSketchSelected(sketch);
+    }
+}
+
+// 这个函数是最终的“执行者”，负责处理从对话框传回的数据
+void MainWindow::OnSweepOperationRequested(const cad_sketch::SketchPtr& profile, const cad_sketch::SketchPtr& path) {
+    // 创建并设置扫掠特征
+    auto sweepFeature = std::make_shared<cad_feature::SweepFeature>("Sweep_01");
+    sweepFeature->SetProfile(profile);
+    sweepFeature->SetPath(path);
+
+    // "注册"到特征管理器和文档树
+    m_featureManager->AddFeature(sweepFeature);
+    m_documentTree->AddFeature(sweepFeature);
+
+    // 执行特征，创建三维模型
+    cad_core::ShapePtr resultShape = sweepFeature->CreateShape();
+
+    // 检查结果并更新UI
+    if (resultShape && resultShape->IsValid()) {
+        m_ocafManager->StartTransaction("Create Sweep");
+        m_ocafManager->AddShape(resultShape, "SweepResult");
+        m_ocafManager->CommitTransaction();
+
+        m_viewer->DisplayShape(resultShape);
+        m_documentTree->AddShape(resultShape);
+        m_viewer->FitAll();
+
+        SetDocumentModified(true);
+        UpdateActions();
+    }
+    else {
+        QMessageBox::critical(this, "创建失败", "无法创建扫掠特征，请检查您的草图是否有效。");
+    }
+}
+
+// cad_ui/src/MainWindow.cpp
+
+// --- BEGIN: 在文件底部（但在 "}" 符号之前）添加这三个新函数 ---
+
+void MainWindow::onDeleteShapeRequested(const cad_core::ShapePtr& shape) {
+    if (!shape) return;
+
+    // 步骤1: 从后台数据模型中删除
+    m_ocafManager->StartTransaction("Delete Shape");
+    bool removedFromOCAF = m_ocafManager->RemoveShape(shape);
+
+    if (removedFromOCAF) {
+        // 步骤2: 从3D视图中移除
+        m_viewer->RemoveShape(shape);
+
+        // 步骤3: 从UI文档树中移除
+        m_documentTree->RemoveShape(shape);
+
+        m_ocafManager->CommitTransaction();
+        SetDocumentModified(true);
+        UpdateActions();
+    }
+    else {
+        m_ocafManager->AbortTransaction();
+        QMessageBox::warning(this, "Error", "Failed to delete shape from the document.");
+    }
+}
+
+void MainWindow::onDeleteFeatureRequested(const cad_feature::FeaturePtr& feature) {
+    if (!feature) return;
+
+    m_featureManager->RemoveFeature(feature);
+    m_documentTree->RemoveFeature(feature);
+
+    
+    SetDocumentModified(true);
+    UpdateActions();
+}
+
+void MainWindow::onDeleteSketchRequested(const cad_sketch::SketchPtr& sketch) {
+    if (!sketch) return;
+
+    // 步骤1: (未来) 从草图管理器中删除
+    // 您的项目目前还没有一个统一的SketchManager，所以我们暂时只操作UI
+
+
+    // 步骤2: 从UI文档树中移除
+    m_documentTree->RemoveSketch(sketch); 
+
+    SetDocumentModified(true);
+    UpdateActions();
 }
 
 } // namespace cad_ui

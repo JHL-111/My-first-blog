@@ -64,7 +64,8 @@ private:
     QPoint m_currentPoint;
     gp_Pln m_sketchPlane;
     Handle(V3d_View) m_view;
-    
+
+
     std::vector<cad_sketch::SketchLinePtr> m_currentLines;
     
     // 辅助方法
@@ -181,6 +182,7 @@ private slots:
     void OnCircleCreated(const cad_sketch::SketchCirclePtr& circle);
     void UpdateCirclePreview(const cad_sketch::SketchCirclePtr& previewCircle);
     void OnDrawingCancelled();
+    
 
 private:
     QtOccView* m_viewer;
@@ -232,6 +234,8 @@ private:
 
     // 清除预览图形的显示
     void ClearPreviewDisplay();
+
+    static int s_sketchCounter;
 
 };
 

@@ -3,6 +3,8 @@
 #pragma execution_character_set("utf-8")
 Q_DECLARE_METATYPE(cad_core::ShapePtr)
 Q_DECLARE_METATYPE(cad_feature::FeaturePtr)
+Q_DECLARE_METATYPE(cad_sketch::SketchPtr)
+
 
 namespace cad_ui {
 
@@ -27,9 +29,14 @@ void DocumentTree::SetupTree() {
     m_featuresRoot = new QTreeWidgetItem(this);
     m_featuresRoot->setText(0, "Features");
     m_featuresRoot->setExpanded(true);
+
+    m_sketchesRoot = new QTreeWidgetItem(this);
+    m_sketchesRoot->setText(0, "Sketches");
+    m_sketchesRoot->setExpanded(true);
     
     addTopLevelItem(m_shapesRoot);
     addTopLevelItem(m_featuresRoot);
+    addTopLevelItem(m_sketchesRoot);
 }
 
 void DocumentTree::CreateContextMenu() {
@@ -113,24 +120,31 @@ void DocumentTree::contextMenuEvent(QContextMenuEvent* event) {
 
 void DocumentTree::OnItemClicked(QTreeWidgetItem* item, int column) {
     Q_UNUSED(column);
-    
-    if (!item || item == m_shapesRoot || item == m_featuresRoot) {
+
+    if (!item || item->parent() == nullptr) { // 检查父节点是否存在
         return;
     }
-    
-    // Check if it's a shape
-    auto shape = item->data(0, Qt::UserRole).value<cad_core::ShapePtr>();
-    if (shape) {
-        emit ShapeSelected(shape);
-        return;
+
+    // 
+    if (item->parent() == m_shapesRoot) {
+        auto shape = item->data(0, Qt::UserRole).value<cad_core::ShapePtr>();
+        if (shape) {
+            emit ShapeSelected(shape);
+        }
     }
-    
-    // Check if it's a feature
-    auto feature = item->data(0, Qt::UserRole).value<cad_feature::FeaturePtr>();
-    if (feature) {
-        emit FeatureSelected(feature);
-        return;
+    else if (item->parent() == m_featuresRoot) {
+        auto feature = item->data(0, Qt::UserRole).value<cad_feature::FeaturePtr>();
+        if (feature) {
+            emit FeatureSelected(feature);
+        }
     }
+    else if (item->parent() == m_sketchesRoot) {
+        auto sketch = item->data(0, Qt::UserRole).value<cad_sketch::SketchPtr>();
+        if (sketch) {
+            emit SketchSelected(sketch);
+        }
+    }
+    // --- END: 替换的代码 ---
 }
 
 void DocumentTree::OnItemDoubleClicked(QTreeWidgetItem* item, int column) {
@@ -144,18 +158,29 @@ void DocumentTree::OnItemDoubleClicked(QTreeWidgetItem* item, int column) {
 
 void DocumentTree::OnDeleteItem() {
     QTreeWidgetItem* item = currentItem();
-    if (!item || item == m_shapesRoot || item == m_featuresRoot) {
+    if (!item || !item->parent()) { // 确保item有效且不是根节点
         return;
     }
-    
-    // Remove the item
+
+    // 判断被删除的item是什么类型，然后发出对应的信号
     if (item->parent() == m_shapesRoot) {
-        m_shapesRoot->removeChild(item);
-    } else if (item->parent() == m_featuresRoot) {
-        m_featuresRoot->removeChild(item);
+        auto shape = item->data(0, Qt::UserRole).value<cad_core::ShapePtr>();
+        if (shape) {
+            emit shapeDeleteRequested(shape); // 发出“请求删除Shape”的信号
+        }
     }
-    
-    delete item;
+    else if (item->parent() == m_featuresRoot) {
+        auto feature = item->data(0, Qt::UserRole).value<cad_feature::FeaturePtr>();
+        if (feature) {
+            emit featureDeleteRequested(feature); // 发出“请求删除Feature”的信号
+        }
+    }
+    else if (item->parent() == m_sketchesRoot) {
+        auto sketch = item->data(0, Qt::UserRole).value<cad_sketch::SketchPtr>();
+        if (sketch) {
+            emit sketchDeleteRequested(sketch); // 发出“请求删除Sketch”的信号
+        }
+    }
 }
 
 void DocumentTree::OnRenameItem() {
@@ -175,6 +200,39 @@ void DocumentTree::OnToggleVisibility() {
     QFont font = item->font(0);
     font.setStrikeOut(!font.strikeOut());
     item->setFont(0, font);
+}
+
+void DocumentTree::AddSketch(const cad_sketch::SketchPtr& sketch) {
+    if (!sketch) return;
+
+    QTreeWidgetItem* item = new QTreeWidgetItem(m_sketchesRoot);
+    item->setText(0, QString::fromStdString(sketch->GetName()));
+    // 将草图指针作为数据存入item中，以便后续识别
+    item->setData(0, Qt::UserRole, QVariant::fromValue(sketch));
+
+    m_sketchesRoot->addChild(item);
+    m_sketchesRoot->setExpanded(true);
+}
+
+void DocumentTree::RemoveSketch(const cad_sketch::SketchPtr& sketch) {
+    if (!sketch || !m_sketchesRoot) return;
+
+    for (int i = 0; i < m_sketchesRoot->childCount(); ++i) {
+        QTreeWidgetItem* item = m_sketchesRoot->child(i);
+        auto itemSketch = item->data(0, Qt::UserRole).value<cad_sketch::SketchPtr>();
+        if (itemSketch == sketch) {
+            m_sketchesRoot->removeChild(item);
+            delete item;
+            break;
+        }
+    }
+}
+
+int DocumentTree::GetSketchCount() const {
+    if (m_sketchesRoot) {
+        return m_sketchesRoot->childCount();
+    }
+    return 0;
 }
 
 } // namespace cad_ui

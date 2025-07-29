@@ -29,6 +29,7 @@
 #include "FilletChamferDialog.h"
 #include "TransformOperationDialog.h"
 #include "FaceSelectionDialog.h"
+#include "SweepFeatureDialog.h" 
 #include "cad_core/CommandManager.h"
 #include "cad_core/OCAFManager.h"
 #include "cad_core/TransformCommand.h"
@@ -168,6 +169,18 @@ private slots:
     void OnFaceSelected(const TopoDS_Face& face);
     void OnFaceSelectedForSketch(const TopoDS_Face& face);
     
+    // 这个槽用于接收扫掠对话框返回的轮廓和路径草图
+    void OnSweepOperationRequested(const cad_sketch::SketchPtr& profile, const cad_sketch::SketchPtr& path);
+    // 这个槽用于接收从文档树传来的草图选择事件
+    void onSketchSelectedFromTree(const cad_sketch::SketchPtr& sketch);
+
+    // 响应删除几何体的请求
+    void onDeleteShapeRequested(const cad_core::ShapePtr& shape);
+    // 响应删除特征的请求
+    void onDeleteFeatureRequested(const cad_feature::FeaturePtr& feature);
+    // 响应删除草图的请求
+    void onDeleteSketchRequested(const cad_sketch::SketchPtr& sketch);
+    
     void OnShapeSelected(const cad_core::ShapePtr& shape);
     void OnViewChanged();
     
@@ -205,6 +218,7 @@ private:
     BooleanOperationDialog* m_currentBooleanDialog;
     FilletChamferDialog* m_currentFilletChamferDialog;
     TransformOperationDialog* m_currentTransformDialog;
+
     
     // Current document info
     QString m_currentFileName;
@@ -330,6 +344,7 @@ private:
     QPushButton* m_closeButton;
     
     cad_sketch::SketchPtr m_lastCompletedSketch;
+    SweepFeatureDialog* m_currentSweepDialog = nullptr;
 
     void CreateTitleBar();
     

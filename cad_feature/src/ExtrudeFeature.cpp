@@ -9,7 +9,13 @@
 #pragma execution_character_set("utf-8")
 #include <Geom_Circle.hxx>
 #include <gp_Ax2.hxx>
-
+#include <gp_Trsf.hxx>
+#include <BRepBuilderAPI_Transform.hxx>
+#include<cmath>
+#include <gp_Pnt.hxx>  
+#include <gp_Dir.hxx>  
+#include <gp_Ax3.hxx> 
+#include <TopoDS_Face.hxx>
 
 namespace cad_feature {
 
@@ -73,6 +79,10 @@ void ExtrudeFeature::SetMidplane(bool midplane) {
 
 bool ExtrudeFeature::GetMidplane() const {
     return GetParameter("midplane") != 0.0;
+}
+
+void ExtrudeFeature::SetSketchPlane(const gp_Pln& plane) {
+    m_sketchPlane = plane;
 }
 
 cad_core::ShapePtr ExtrudeFeature::CreateShape() const {

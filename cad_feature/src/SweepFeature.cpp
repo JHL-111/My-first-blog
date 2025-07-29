@@ -1,9 +1,40 @@
 ﻿#include "cad_feature/SweepFeature.h"
 #include "cad_core/CreateBoxCommand.h"
 #include <BRepOffsetAPI_MakePipe.hxx>
+#include <BRepBuilderAPI_MakeWire.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
+#include <Geom_Circle.hxx>
+#include <gp_Ax2.hxx>
 #include <cmath>
 
 namespace cad_feature {
+
+// 将草图对象转换为OpenCASCADE的线框
+TopoDS_Wire ConvertSketchToWire(const cad_sketch::SketchPtr& sketch) {
+    if (!sketch || sketch->IsEmpty()) {
+        return TopoDS_Wire();
+    }
+
+    BRepBuilderAPI_MakeWire wireMaker;
+    for (const auto& elem : sketch->GetElements()) {
+        if (elem->GetType() == cad_sketch::SketchElementType::Line) {
+            auto line = std::static_pointer_cast<cad_sketch::SketchLine>(elem);
+            const auto& startPnt = line->GetStartPoint()->GetPoint().GetOCCTPoint();
+            const auto& endPnt = line->GetEndPoint()->GetPoint().GetOCCTPoint();
+            if (!startPnt.IsEqual(endPnt, 1e-7)) {
+                wireMaker.Add(BRepBuilderAPI_MakeEdge(startPnt, endPnt).Edge());
+            }
+        }
+        else if (elem->GetType() == cad_sketch::SketchElementType::Circle) {
+            auto circle = std::static_pointer_cast<cad_sketch::SketchCircle>(elem);
+            gp_Ax2 axis(circle->GetCenter()->GetPoint().GetOCCTPoint(), gp::DZ());
+            Handle(Geom_Circle) geomCircle = new Geom_Circle(axis, circle->GetRadius());
+            wireMaker.Add(BRepBuilderAPI_MakeEdge(geomCircle).Edge());
+        }
+    }
+    return wireMaker.Wire();
+}
+
 
 SweepFeature::SweepFeature() : Feature(FeatureType::Sweep, "Sweep") {
     SetParameter("twist_angle", 0.0);
@@ -57,6 +88,8 @@ bool SweepFeature::GetKeepOriginalOrientation() const {
     return GetParameter("keep_orientation") != 0.0;
 }
 
+
+//核心逻辑：创建扫掠
 cad_core::ShapePtr SweepFeature::CreateShape() const {
     if (!ValidateParameters()) {
         return nullptr;
@@ -97,22 +130,28 @@ cad_core::ShapePtr SweepFeature::SweepProfile() const {
     }
     
     try {
-        // In a real implementation, this would:
-        // 1. Convert profile sketch to OCCT wire/face
-        // 2. Convert path sketch to OCCT wire
-        // 3. Use BRepOffsetAPI_MakePipe to create the swept solid
-        // 4. Apply twist and scaling if specified
-        
-        // For now, return a simple shape as placeholder
-        auto shape = std::make_shared<cad_core::Shape>();
-        
-        // Placeholder: create a simple box-like shape
-        // In real implementation, this would properly sweep the profile along the path
-        
-        return shape;
-    } catch (...) {
+        // 1. 将草图转换为 OpenCASCADE 的线框
+        TopoDS_Wire profileWire = ConvertSketchToWire(m_profile);
+        TopoDS_Wire pathWire = ConvertSketchToWire(m_path);
+
+        if (profileWire.IsNull() || pathWire.IsNull()) {
+            return nullptr;
+        }
+
+        // 2. 使用核心API BRepOffsetAPI_MakePipe 执行扫掠
+        BRepOffsetAPI_MakePipe pipeMaker(pathWire, profileWire);
+        pipeMaker.Build();
+
+        // 3. 检查并返回结果
+        if (pipeMaker.IsDone()) {
+            return std::make_shared<cad_core::Shape>(pipeMaker.Shape());
+        }
+    } catch (const Standard_Failure& e) {
+        //异常处理
         return nullptr;
     }
+
+	return nullptr;
 }
 
 } // namespace cad_feature

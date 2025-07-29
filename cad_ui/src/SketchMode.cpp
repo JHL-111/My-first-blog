@@ -25,6 +25,9 @@
 
 namespace cad_ui {
 
+
+int SketchMode::s_sketchCounter = 1;
+
 // =============================================================================
 // SketchRectangleTool Implementation
 // =============================================================================
@@ -239,16 +242,35 @@ void SketchLineTool::SetView(Handle(V3d_View) view) {
 }
 
 gp_Pnt SketchLineTool::ScreenToSketchPlane(const QPoint& screenPoint) {
-    if (m_view.IsNull() || m_sketchPlane.Location().X() > 1.0e+99) {
+    // 使用和矩形/圆形工具完全相同的、正确的坐标转换方法
+    if (m_view.IsNull()) {
         return gp_Pnt(0, 0, 0);
     }
-    Standard_Real aGridX, aGridY, aGridZ;
-    m_view->ConvertToGrid(screenPoint.x(), screenPoint.y(), aGridX, aGridY, aGridZ);
-    gp_Pnt aPntOnPlane(aGridX, aGridY, aGridZ);
-    Standard_Real u, v;
-    ElSLib::Parameters(m_sketchPlane, aPntOnPlane, u, v);
-    gp_Pnt2d pnt2d(u, v);
-    return gp_Pnt(pnt2d.X(), pnt2d.Y(), 0);
+
+    // 从屏幕点创建一条穿过视图的射线
+    Standard_Real Xp, Yp, Zp, Xv, Yv, Zv;
+    m_view->Convert(screenPoint.x(), screenPoint.y(), Xp, Yp, Zp);
+    m_view->Proj(Xv, Yv, Zv);
+    gp_Lin line(gp_Pnt(Xp, Yp, Zp), gp_Dir(Xv, Yv, Zv));
+
+    // 计算射线与草图平面的交点
+    Handle(Geom_Plane) plane = new Geom_Plane(m_sketchPlane);
+    GeomAPI_IntCS intCS;
+    intCS.Perform(new Geom_Line(line), plane);
+
+    if (intCS.IsDone() && intCS.NbPoints() > 0) {
+        gp_Pnt result = intCS.Point(1);
+
+        // 将3D交点转换为草图平面内的2D坐标
+        Standard_Real u, v;
+        ElSLib::Parameters(m_sketchPlane, result, u, v);
+
+        // 返回一个Z值为0的点，因为它是在草图坐标系内的
+        return gp_Pnt(u, v, 0);
+    }
+
+    // 如果计算失败，返回一个默认点
+    return gp_Pnt(0, 0, 0);
 }
 
 // =============================================================================
@@ -415,7 +437,8 @@ bool SketchMode::EnterSketchMode(const TopoDS_Face& face) {
         SetupSketchPlane(face);
         
         // 创建新的草图
-        m_currentSketch = std::make_shared<cad_sketch::Sketch>("Sketch_001");
+        std::string sketchName = "Sketch_" + std::to_string(s_sketchCounter++);
+        m_currentSketch = std::make_shared<cad_sketch::Sketch>(sketchName);
         
         // 设置草图视图
         SetupSketchView();
@@ -790,14 +813,19 @@ gp_Pln SketchMode::ExtractPlaneFromFace(const TopoDS_Face& face) {
 
 // 将 SketchLine 转换为 TopoDS_Edge
 TopoDS_Edge SketchMode::ConvertLineToEdge(const cad_sketch::SketchLinePtr& line) const {
-    const auto& p1 = line->GetStartPoint()->GetPoint().GetOCCTPoint();
-    const auto& p2 = line->GetEndPoint()->GetPoint().GetOCCTPoint();
-    
-    if (p1.IsEqual(p2, 1e-9)) {
-        return TopoDS_Edge(); // 如果点重合，返回一个空的无效Edge，阻止崩溃
+    // 获取2D草图坐标系中的点
+    const auto& p1_2d = line->GetStartPoint()->GetPoint().GetOCCTPoint();
+    const auto& p2_2d = line->GetEndPoint()->GetPoint().GetOCCTPoint();
+
+    // 使用 ElSLib::Value 将2D点“翻译回”到3D草图平面上
+    gp_Pnt p1_3d = ElSLib::Value(p1_2d.X(), p1_2d.Y(), m_sketchPlane);
+    gp_Pnt p2_3d = ElSLib::Value(p2_2d.X(), p2_2d.Y(), m_sketchPlane);
+
+    if (p1_3d.IsEqual(p2_3d, 1e-9)) {
+        return TopoDS_Edge();
     }
-    
-    return BRepBuilderAPI_MakeEdge(p1, p2).Edge();
+
+    return BRepBuilderAPI_MakeEdge(p1_3d, p2_3d).Edge();
 }
 
 TopoDS_Edge SketchMode::ConvertCircleToEdge(const cad_sketch::SketchCirclePtr& circle) const {
