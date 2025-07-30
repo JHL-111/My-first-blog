@@ -1166,6 +1166,15 @@ cad_sketch::SketchPtr QtOccView::GetCurrentSketch() const {
     return nullptr;
 }
 
+Handle(AIS_Shape) QtOccView::GetAisShapeForShape(const cad_core::ShapePtr& shape) const
+{
+    auto it = m_shapeToAIS.find(shape);
+    if (it != m_shapeToAIS.end()) {
+        return it->second;
+    }
+    return nullptr;
+}
+
 
 } // namespace cad_ui
 

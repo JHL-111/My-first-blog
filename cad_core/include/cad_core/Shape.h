@@ -15,6 +15,7 @@
 #include <TopoDS_Shape.hxx>
 #include <memory>
 
+
 namespace cad_core {
 
 /**
@@ -79,3 +80,4 @@ private:
 using ShapePtr = std::shared_ptr<Shape>;
 
 } // namespace cad_core
+

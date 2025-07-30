@@ -5,6 +5,9 @@
 #include <QStatusBar>
 #include <QDockWidget>
 #include <QSplitter>
+#include <QVariant>                 
+#include <AIS_InteractiveObject.hxx> 
+#include <map>                       
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QAction>
@@ -17,7 +20,6 @@
 #include <QResizeEvent>
 #include <QComboBox>
 #include <QTextEdit>
-#include <QSplitter>
 
 #include "QtOccView.h"
 #include "DocumentTree.h"
@@ -192,6 +194,8 @@ private slots:
     void CloseDocumentTab(int index);
     void OnTabChanged(int index);
     void NewDocumentTab();
+    void onSketchCompleted(const cad_sketch::SketchPtr& sketch, const std::map<cad_sketch::SketchElementPtr, Handle(AIS_Shape)>& displayedElements);
+    void onVisibilityToggled(const QVariant& itemData);
 
 private:
     // UI 组件
@@ -342,8 +346,16 @@ private:
     QPushButton* m_minimizeButton;
     QPushButton* m_maximizeButton;
     QPushButton* m_closeButton;
+
+    // 用于追踪所有UI项与其3D显示实体的对应关系 (void* 作为通用键)
+    std::map<void*, std::vector<Handle(AIS_InteractiveObject)>> m_itemToAisMap;
+    // 用于快速从ShapePtr找到其AIS_Shape
+    std::map<cad_core::ShapePtr, Handle(AIS_Shape)> m_shapeToAisMap;
+
     
     cad_sketch::SketchPtr m_lastCompletedSketch;
+    std::map<cad_sketch::SketchPtr, std::vector<Handle(AIS_Shape)>> m_displayedSketches;
+    std::map<void*, Handle(AIS_InteractiveObject)> m_displayedObjects;
 	gp_Pln m_lastSketchPlane; // Last sketch plane used
     SweepFeatureDialog* m_currentSweepDialog = nullptr;
 
@@ -353,6 +365,8 @@ private slots:
     void OnMinimizeWindow();
     void OnMaximizeWindow();
     void OnCloseWindow();
+    
+
 };
 
 } // namespace cad_ui

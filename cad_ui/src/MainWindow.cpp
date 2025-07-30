@@ -860,8 +860,31 @@ void MainWindow::ConnectSignals() {
     connect(m_viewer, &QtOccView::ShapeSelected, this, &MainWindow::OnShapeSelected);
     connect(m_viewer, &QtOccView::ViewChanged, this, &MainWindow::OnViewChanged);
     connect(m_viewer, &QtOccView::FaceSelected, this, &MainWindow::OnFaceSelected);
+
+    connect(m_viewer, &QtOccView::SketchModeEntered, this, [this]() {
+        if (m_viewer && m_viewer->GetSketchMode()) {
+            connect(m_viewer->GetSketchMode(), &SketchMode::sketchCompleted, this, &MainWindow::onSketchCompleted);
+        }
+        });
+    connect(m_viewer, &QtOccView::SketchModeExited, this, [this]() {
+        if (m_viewer && m_viewer->GetSketchMode()) {
+            disconnect(m_viewer->GetSketchMode(), &SketchMode::sketchCompleted, this, &MainWindow::onSketchCompleted);
+        }
+        });
+
     connect(m_viewer, &QtOccView::SketchModeEntered, this, &MainWindow::OnSketchModeEntered);
     connect(m_viewer, &QtOccView::SketchModeExited, this, &MainWindow::OnSketchModeExited);
+
+    connect(m_viewer, &QtOccView::SketchModeEntered, this, [this]() {
+        if (m_viewer->GetSketchMode()) {
+            connect(m_viewer->GetSketchMode(), &SketchMode::sketchCompleted, this, &MainWindow::onSketchCompleted);
+        }
+        });
+    connect(m_viewer, &QtOccView::SketchModeExited, this, [this]() {
+        if (m_viewer->GetSketchMode()) {
+            disconnect(m_viewer->GetSketchMode(), &SketchMode::sketchCompleted, this, &MainWindow::onSketchCompleted);
+        }
+        });
     
     // Mouse position signals
     //connect(m_viewer, &QtOccView::MousePositionChanged, m_statusBar, &StatusBar::updateMousePosition2D);
@@ -875,6 +898,7 @@ void MainWindow::ConnectSignals() {
     connect(m_documentTree, &DocumentTree::shapeDeleteRequested, this, &MainWindow::onDeleteShapeRequested);
     connect(m_documentTree, &DocumentTree::featureDeleteRequested, this, &MainWindow::onDeleteFeatureRequested);
     connect(m_documentTree, &DocumentTree::sketchDeleteRequested, this, &MainWindow::onDeleteSketchRequested);
+    connect(m_documentTree, &DocumentTree::visibilityToggled, this, &MainWindow::onVisibilityToggled);
 
 }
 
@@ -1095,6 +1119,14 @@ void MainWindow::OnCreateBox() {
             if (m_ocafManager->AddShape(shape, "Box")) {
                 // Display the shape
                 m_viewer->DisplayShape(shape);
+
+                Handle(AIS_Shape) aisShape = m_viewer->GetAisShapeForShape(shape);
+                if (!aisShape.IsNull()) {
+                    m_shapeToAisMap[shape] = aisShape;
+                    // 使用智能指针的原始指针作为键
+                    m_itemToAisMap[shape.get()].push_back(aisShape);
+                }
+
                 m_documentTree->AddShape(shape);
                 
                 // Commit the transaction
@@ -1128,6 +1160,14 @@ void MainWindow::OnCreateCylinder() {
             if (m_ocafManager->AddShape(shape, "Cylinder")) {
                 // Display the shape
                 m_viewer->DisplayShape(shape);
+
+                Handle(AIS_Shape) aisShape = m_viewer->GetAisShapeForShape(shape);
+                if (!aisShape.IsNull()) {
+                    m_shapeToAisMap[shape] = aisShape;
+                    // 使用智能指针的原始指针作为键
+                    m_itemToAisMap[shape.get()].push_back(aisShape);
+                }
+
                 m_documentTree->AddShape(shape);
                 
                 // Commit the transaction
@@ -1160,6 +1200,14 @@ void MainWindow::OnCreateSphere() {
             if (m_ocafManager->AddShape(shape, "Sphere")) {
                 // Display the shape
                 m_viewer->DisplayShape(shape);
+
+                Handle(AIS_Shape) aisShape = m_viewer->GetAisShapeForShape(shape);
+                if (!aisShape.IsNull()) {
+                    m_shapeToAisMap[shape] = aisShape;
+                    // 使用智能指针的原始指针作为键
+                    m_itemToAisMap[shape.get()].push_back(aisShape);
+                }
+
                 m_documentTree->AddShape(shape);
                 
                 // Commit the transaction
@@ -1191,6 +1239,14 @@ void MainWindow::OnCreateTorus() {
 
             if (m_ocafManager->AddShape(shape, "Torus")) {
                 m_viewer->DisplayShape(shape);
+
+                Handle(AIS_Shape) aisShape = m_viewer->GetAisShapeForShape(shape);
+                if (!aisShape.IsNull()) {
+                    m_shapeToAisMap[shape] = aisShape;
+                    // 使用智能指针的原始指针作为键
+                    m_itemToAisMap[shape.get()].push_back(aisShape);
+                }
+
                 m_documentTree->AddShape(shape);
 
                 m_ocafManager->CommitTransaction();
@@ -2401,6 +2457,14 @@ void MainWindow::OnSweepOperationRequested(const cad_sketch::SketchPtr& profile,
     auto sweepFeature = std::make_shared<cad_feature::SweepFeature>("Sweep_01");
     sweepFeature->SetProfile(profile);
     sweepFeature->SetPath(path);
+    
+    //从Sketch对象获取平面并设置给Feature
+    if (profile) {
+        sweepFeature->SetProfilePlane(profile->GetPlane());
+    }
+    if (path) {
+        sweepFeature->SetPathPlane(path->GetPlane());
+    }
 
     // "注册"到特征管理器和文档树
     m_featureManager->AddFeature(sweepFeature);
@@ -2427,22 +2491,23 @@ void MainWindow::OnSweepOperationRequested(const cad_sketch::SketchPtr& profile,
     }
 }
 
-// cad_ui/src/MainWindow.cpp
-
-// --- BEGIN: 在文件底部（但在 "}" 符号之前）添加这三个新函数 ---
-
 void MainWindow::onDeleteShapeRequested(const cad_core::ShapePtr& shape) {
     if (!shape) return;
 
-    // 步骤1: 从后台数据模型中删除
+    // 从后台数据模型中删除
     m_ocafManager->StartTransaction("Delete Shape");
     bool removedFromOCAF = m_ocafManager->RemoveShape(shape);
 
     if (removedFromOCAF) {
-        // 步骤2: 从3D视图中移除
+
+        // 从追踪map中移除
+        m_itemToAisMap.erase(shape.get());
+        m_shapeToAisMap.erase(shape);
+
+        // 从3D视图中移除
         m_viewer->RemoveShape(shape);
 
-        // 步骤3: 从UI文档树中移除
+        // 从UI文档树中移除
         m_documentTree->RemoveShape(shape);
 
         m_ocafManager->CommitTransaction();
@@ -2469,15 +2534,66 @@ void MainWindow::onDeleteFeatureRequested(const cad_feature::FeaturePtr& feature
 void MainWindow::onDeleteSketchRequested(const cad_sketch::SketchPtr& sketch) {
     if (!sketch) return;
 
-    // 步骤1: (未来) 从草图管理器中删除
-    // 您的项目目前还没有一个统一的SketchManager，所以我们暂时只操作UI
+    // 从3D视图中移除图形
+    if (m_itemToAisMap.count(sketch.get())) {
+        for (const auto& aisShape : m_itemToAisMap[sketch.get()]) {
+            if (!aisShape.IsNull() && m_viewer->GetContext()) {
+                m_viewer->GetContext()->Remove(aisShape, true);
+            }
+        }
+        m_itemToAisMap.erase(sketch.get());
+    }
 
-
-    // 步骤2: 从UI文档树中移除
-    m_documentTree->RemoveSketch(sketch); 
+    // 从UI文档树中移除
+    m_documentTree->RemoveSketch(sketch);
 
     SetDocumentModified(true);
     UpdateActions();
+}
+
+
+void MainWindow::onSketchCompleted(const cad_sketch::SketchPtr& sketch, const std::map<cad_sketch::SketchElementPtr, Handle(AIS_Shape)>& displayedElements)
+{
+    if (!sketch || displayedElements.empty()) return;
+
+    std::vector<Handle(AIS_InteractiveObject)> aisShapes;
+    for (const auto& pair : displayedElements) {
+        aisShapes.push_back(pair.second);
+    }
+    m_itemToAisMap[sketch.get()] = aisShapes;
+}
+
+void MainWindow::onVisibilityToggled(const QVariant& itemData)
+{
+    void* itemPtr = nullptr;
+    // 判断QVariant中存储的是哪种类型的智能指针，并获取其原始指针作为map的键
+    if (itemData.canConvert<cad_core::ShapePtr>()) {
+        itemPtr = itemData.value<cad_core::ShapePtr>().get();
+    }
+    else if (itemData.canConvert<cad_sketch::SketchPtr>()) {
+        itemPtr = itemData.value<cad_sketch::SketchPtr>().get();
+    }
+    else if (itemData.canConvert<cad_feature::FeaturePtr>()) {
+        // 对Feature的隐藏/显示逻辑可以后续添加
+        return;
+    }
+
+    if (itemPtr && m_itemToAisMap.count(itemPtr)) {
+        bool isNowVisible = true;
+        for (const auto& aisObject : m_itemToAisMap[itemPtr]) {
+            if (m_viewer->GetContext()->IsDisplayed(aisObject)) {
+                m_viewer->GetContext()->Erase(aisObject, false); // false表示稍后统一重绘
+                isNowVisible = false; // 只要有一个是显示的，就切换为隐藏
+            }
+            else {
+                m_viewer->GetContext()->Display(aisObject, false);
+                isNowVisible = true;
+            }
+        }
+        m_viewer->GetView()->Redraw(); // 统一重绘
+
+        m_documentTree->setItemVisibilityState(itemData, isNowVisible);
+    }
 }
 
 } // namespace cad_ui

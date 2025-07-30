@@ -439,6 +439,9 @@ bool SketchMode::EnterSketchMode(const TopoDS_Face& face) {
         // 创建新的草图
         std::string sketchName = "Sketch_" + std::to_string(s_sketchCounter++);
         m_currentSketch = std::make_shared<cad_sketch::Sketch>(sketchName);
+
+        // 将当前平面存入Sketch对象
+        m_currentSketch->SetPlane(m_sketchPlane); 
         
         // 设置草图视图
         SetupSketchView();
@@ -469,27 +472,33 @@ void SketchMode::ExitSketchMode() {
     if (!m_isActive) {
         return;
     }
-    
-    // 停止当前工具
-    StopCurrentTool();
-    
-    // 恢复视图
-    RestoreView();
-    
-	// 清除草图显示
-	ClearAllSketchDisplay();
 
-    // 清理草图数据
-    m_currentSketch.reset();
-    m_sketchFace = TopoDS_Face();
-    
+    StopCurrentTool();
+    RestoreView();
+
+    // 将颜色改为灰色
+    if (m_viewer && !m_viewer->GetContext().IsNull()) {
+        for (const auto& pair : m_displayedElements) {
+            pair.second->SetColor(Quantity_NOC_GRAY50);
+        }
+        m_viewer->GetContext()->UpdateCurrentViewer();
+        m_viewer->GetView()->Redraw();
+    }
+
+    // 发射信号，移交管理权 
+    if (m_currentSketch && !m_displayedElements.empty()) {
+        emit sketchCompleted(m_currentSketch, m_displayedElements);
+    }
+    m_displayedElements.clear(); // 清空自己的列表
+
     m_isActive = false;
-    
-    emit sketchModeExited();
+
+    emit sketchModeExited(); // 通知UI状态改变
     emit statusMessageChanged("退出草图模式");
-    
-    qDebug() << "Exited sketch mode";
+
+    qDebug() << "Exited sketch mode, ownership transferred.";
 }
+
 
 void SketchMode::StartRectangleTool() {
     if (!m_isActive) {

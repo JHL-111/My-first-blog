@@ -6,11 +6,12 @@
 #include <Geom_Circle.hxx>
 #include <gp_Ax2.hxx>
 #include <cmath>
+#include <ElSLib.hxx>
 
 namespace cad_feature {
 
 // 将草图对象转换为OpenCASCADE的线框
-TopoDS_Wire ConvertSketchToWire(const cad_sketch::SketchPtr& sketch) {
+TopoDS_Wire ConvertSketchToWire(const cad_sketch::SketchPtr& sketch, const gp_Pln& plane) {
     if (!sketch || sketch->IsEmpty()) {
         return TopoDS_Wire();
     }
@@ -19,15 +20,25 @@ TopoDS_Wire ConvertSketchToWire(const cad_sketch::SketchPtr& sketch) {
     for (const auto& elem : sketch->GetElements()) {
         if (elem->GetType() == cad_sketch::SketchElementType::Line) {
             auto line = std::static_pointer_cast<cad_sketch::SketchLine>(elem);
-            const auto& startPnt = line->GetStartPoint()->GetPoint().GetOCCTPoint();
-            const auto& endPnt = line->GetEndPoint()->GetPoint().GetOCCTPoint();
-            if (!startPnt.IsEqual(endPnt, 1e-7)) {
-                wireMaker.Add(BRepBuilderAPI_MakeEdge(startPnt, endPnt).Edge());
+            const auto& p1_2d = line->GetStartPoint()->GetPoint().GetOCCTPoint();
+            const auto& p2_2d = line->GetEndPoint()->GetPoint().GetOCCTPoint();
+
+            //  使用 ElSLib::Value 将2D点转换为3D平面上的点
+            gp_Pnt p1_3d = ElSLib::Value(p1_2d.X(), p1_2d.Y(), plane);
+            gp_Pnt p2_3d = ElSLib::Value(p2_2d.X(), p2_2d.Y(), plane);
+
+            if (!p1_3d.IsEqual(p2_3d, 1e-7)) {
+                wireMaker.Add(BRepBuilderAPI_MakeEdge(p1_3d, p2_3d).Edge());
             }
         }
         else if (elem->GetType() == cad_sketch::SketchElementType::Circle) {
             auto circle = std::static_pointer_cast<cad_sketch::SketchCircle>(elem);
-            gp_Ax2 axis(circle->GetCenter()->GetPoint().GetOCCTPoint(), gp::DZ());
+            const auto& center_2d = circle->GetCenter()->GetPoint().GetOCCTPoint();
+
+            //  同样转换圆心，并使用平面的法线作为圆的轴向
+            gp_Pnt center_3d = ElSLib::Value(center_2d.X(), center_2d.Y(), plane);
+            gp_Ax2 axis(center_3d, plane.Axis().Direction()); // 使用平面的法线
+
             Handle(Geom_Circle) geomCircle = new Geom_Circle(axis, circle->GetRadius());
             wireMaker.Add(BRepBuilderAPI_MakeEdge(geomCircle).Edge());
         }
@@ -46,6 +57,14 @@ SweepFeature::SweepFeature(const std::string& name) : Feature(FeatureType::Sweep
     SetParameter("twist_angle", 0.0);
     SetParameter("scale_factor", 1.0);
     SetParameter("keep_orientation", 1.0);
+}
+
+void SweepFeature::SetProfilePlane(const gp_Pln& plane) {
+    m_profilePlane = plane;
+}
+
+void SweepFeature::SetPathPlane(const gp_Pln& plane) {
+    m_pathPlane = plane;
 }
 
 void SweepFeature::SetProfile(const cad_sketch::SketchPtr& profile) {
@@ -131,8 +150,8 @@ cad_core::ShapePtr SweepFeature::SweepProfile() const {
     
     try {
         // 1. 将草图转换为 OpenCASCADE 的线框
-        TopoDS_Wire profileWire = ConvertSketchToWire(m_profile);
-        TopoDS_Wire pathWire = ConvertSketchToWire(m_path);
+        TopoDS_Wire profileWire = ConvertSketchToWire(m_profile, m_profilePlane);
+        TopoDS_Wire pathWire = ConvertSketchToWire(m_path, m_pathPlane);
 
         if (profileWire.IsNull() || pathWire.IsNull()) {
             return nullptr;

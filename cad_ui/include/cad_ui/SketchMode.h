@@ -175,6 +175,7 @@ signals:
     void sketchModeExited();
     void sketchElementCreated(cad_sketch::SketchElementPtr element);
     void statusMessageChanged(const QString& message);
+    void sketchCompleted(const cad_sketch::SketchPtr& sketch, const std::map<cad_sketch::SketchElementPtr, Handle(AIS_Shape)>& displayedElements);
 
 private slots:
     void OnRectangleCreated(const std::vector<cad_sketch::SketchLinePtr>& lines);

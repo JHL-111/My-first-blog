@@ -10,6 +10,7 @@
 #include <GProp_GProps.hxx>  // 几何属性计算 - OpenCASCADE的瑞士军刀
 #include <BRepGProp.hxx>     // 边界表示几何属性 - 专门处理实体几何
 
+
 namespace cad_core {
 
 /**
@@ -109,3 +110,4 @@ double Shape::Area() const {
 }
 
 } // namespace cad_core
+

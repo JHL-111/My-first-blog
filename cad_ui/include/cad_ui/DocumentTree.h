@@ -26,6 +26,7 @@ public:
     void RemoveSketch(const cad_sketch::SketchPtr& sketch);
     int GetSketchCount() const;
     void Clear();
+    void setItemVisibilityState(const QVariant& itemData, bool visible);
 
 signals:
     void ShapeSelected(const cad_core::ShapePtr& shape);
@@ -37,6 +38,8 @@ signals:
     void featureDeleteRequested(const cad_feature::FeaturePtr& feature);
     // 请求删除一个草图 (Sketch)
     void sketchDeleteRequested(const cad_sketch::SketchPtr& sketch);
+	// 请求隐藏一个几何体 (Shape)
+    void visibilityToggled(const QVariant& itemData);
 
 protected:
     void contextMenuEvent(QContextMenuEvent* event) override;
@@ -62,3 +65,12 @@ private:
 };
 
 } // namespace cad_ui
+
+#include <QMetaType>
+
+// 由于我们只是用智能指针，不需要包含完整的类定义，
+// 只需要在使用前告诉编译器这些类型存在即可。
+// 这样可以加快编译速度并减少依赖。
+Q_DECLARE_METATYPE(cad_core::ShapePtr)
+Q_DECLARE_METATYPE(cad_feature::FeaturePtr)
+Q_DECLARE_METATYPE(cad_sketch::SketchPtr)

@@ -105,6 +105,7 @@ public:
 
     cad_sketch::SketchPtr GetCurrentSketch() const;
     class SketchMode* GetSketchMode() const { return m_sketchMode.get(); }
+    Handle(AIS_Shape) GetAisShapeForShape(const cad_core::ShapePtr& shape) const;
 
 signals:
     void ShapeSelected(const cad_core::ShapePtr& shape);

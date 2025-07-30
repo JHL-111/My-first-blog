@@ -4,10 +4,18 @@
 
 namespace cad_sketch {
 
-Sketch::Sketch() : m_name("Sketch") {
+Sketch::Sketch() : m_name("Sketch"), m_plane(gp::XOY()) { 
 }
 
-Sketch::Sketch(const std::string& name) : m_name(name) {
+Sketch::Sketch(const std::string& name) : m_name(name), m_plane(gp::XOY()) { 
+}
+
+void Sketch::SetPlane(const gp_Pln& plane) {
+    m_plane = plane;
+}
+
+const gp_Pln& Sketch::GetPlane() const {
+    return m_plane;
 }
 
 const std::string& Sketch::GetName() const {

@@ -1,9 +1,8 @@
 ﻿#include "cad_ui/DocumentTree.h"
 #include <QHeaderView>
+#include <QApplication>
 #pragma execution_character_set("utf-8")
-Q_DECLARE_METATYPE(cad_core::ShapePtr)
-Q_DECLARE_METATYPE(cad_feature::FeaturePtr)
-Q_DECLARE_METATYPE(cad_sketch::SketchPtr)
+
 
 
 namespace cad_ui {
@@ -192,14 +191,27 @@ void DocumentTree::OnRenameItem() {
 
 void DocumentTree::OnToggleVisibility() {
     QTreeWidgetItem* item = currentItem();
-    if (!item || item == m_shapesRoot || item == m_featuresRoot) {
+    if (!item || !item->parent()) {
         return;
     }
-    
-    // Toggle visibility (placeholder - would need to be implemented with actual visibility logic)
+
+    /// 1. 立即更新UI，提供即时反馈
     QFont font = item->font(0);
-    font.setStrikeOut(!font.strikeOut());
+    bool isCurrentlyVisible = !font.strikeOut();
+    font.setStrikeOut(isCurrentlyVisible); // 切换删除线状态
     item->setFont(0, font);
+    if (isCurrentlyVisible) {
+        item->setForeground(0, QColor(Qt::gray));
+    }
+    else {
+        item->setForeground(0, QApplication::palette().text());
+    }
+
+    // 2. 发射信号，请求后台执行真正的隐藏/显示操作
+    QVariant data = item->data(0, Qt::UserRole);
+    if (data.isValid()) {
+        emit visibilityToggled(data);
+    }
 }
 
 void DocumentTree::AddSketch(const cad_sketch::SketchPtr& sketch) {
@@ -233,6 +245,44 @@ int DocumentTree::GetSketchCount() const {
         return m_sketchesRoot->childCount();
     }
     return 0;
+}
+
+// 辅助函数：递归查找item
+QTreeWidgetItem* findItemByData(QTreeWidgetItem* parent, const QVariant& data) {
+    for (int i = 0; i < parent->childCount(); ++i) {
+        QTreeWidgetItem* child = parent->child(i);
+        if (child->data(0, Qt::UserRole) == data) {
+            return child;
+        }
+        if (child->childCount() > 0) {
+            QTreeWidgetItem* result = findItemByData(child, data);
+            if (result) return result;
+        }
+    }
+    return nullptr;
+}
+
+void DocumentTree::setItemVisibilityState(const QVariant& itemData, bool visible)
+{
+    QTreeWidgetItem* itemToUpdate = nullptr;
+    // 在所有根节点下查找
+    for (int i = 0; i < topLevelItemCount(); ++i) {
+        itemToUpdate = findItemByData(topLevelItem(i), itemData);
+        if (itemToUpdate) break;
+    }
+
+    if (itemToUpdate) {
+        QFont font = itemToUpdate->font(0);
+        font.setStrikeOut(!visible); // 如果不可见 (visible=false)，就添加删除线
+        itemToUpdate->setFont(0, font);
+
+        if (visible) {
+            itemToUpdate->setForeground(0, QApplication::palette().text());
+        }
+        else {
+            itemToUpdate->setForeground(0, QColor(Qt::gray)); // 设为灰色以示区分
+        }
+    }
 }
 
 } // namespace cad_ui

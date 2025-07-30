@@ -26,6 +26,8 @@
 #include <vector>            // 动态数组 - 容器界的万金油
 #include <memory>            // 智能指针 - 内存管理的得力助手
 #include <string>            // 字符串 - 人机交流的桥梁
+#include <gp_Pln.hxx>       // OpenCASCADE几何平面类 - 草图的舞台
+
 
 namespace cad_sketch {
 
@@ -64,6 +66,9 @@ public:
      * @param name 新的名称，要起得有意义哦
      */
     void SetName(const std::string& name);
+
+    void SetPlane(const gp_Pln& plane);
+    const gp_Pln& GetPlane() const;
     
     // ========== 元素管理 - 画板上的"演员"们 ==========
     
@@ -179,6 +184,8 @@ private:
     /** 草图名称 - 这幅"作品"的标题 */
     std::string m_name;
     
+    gp_Pln m_plane;
+
     /** 草图元素集合 - 画板上的所有"演员" */
     std::vector<SketchElementPtr> m_elements;
     

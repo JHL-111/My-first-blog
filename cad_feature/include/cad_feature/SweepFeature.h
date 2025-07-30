@@ -3,6 +3,7 @@
 #include "Feature.h"
 #include "cad_sketch/Sketch.h"
 #include <vector>
+#include <gp_Pln.hxx>
 
 namespace cad_feature {
 
@@ -18,6 +19,10 @@ public:
     
     void SetPath(const cad_sketch::SketchPtr& path);
     const cad_sketch::SketchPtr& GetPath() const;
+
+    void SetProfilePlane(const gp_Pln& plane);
+    void SetPathPlane(const gp_Pln& plane);
+
     
     // Sweep parameters
     void SetTwistAngle(double angle);
@@ -37,6 +42,9 @@ public:
 private:
     cad_sketch::SketchPtr m_profile;
     cad_sketch::SketchPtr m_path;
+
+    gp_Pln m_profilePlane;
+    gp_Pln m_pathPlane;
     
     bool IsProfileValid() const;
     bool IsPathValid() const;
