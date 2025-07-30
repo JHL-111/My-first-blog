@@ -32,11 +32,13 @@
 #include "TransformOperationDialog.h"
 #include "FaceSelectionDialog.h"
 #include "SweepFeatureDialog.h" 
+#include "LoftFeatureDialog.h"
 #include "cad_core/CommandManager.h"
 #include "cad_core/OCAFManager.h"
 #include "cad_core/TransformCommand.h"
 #include "cad_feature/FeatureManager.h"
 #include "cad_sketch/Sketch.h"
+
 
 
 namespace cad_ui {
@@ -175,6 +177,9 @@ private slots:
     void OnSweepOperationRequested(const cad_sketch::SketchPtr& profile, const cad_sketch::SketchPtr& path);
     // 这个槽用于接收从文档树传来的草图选择事件
     void onSketchSelectedFromTree(const cad_sketch::SketchPtr& sketch);
+    // 这个槽用于接收放样对话框返回的截面列表
+    void OnLoftOperationRequested(const std::vector<cad_sketch::SketchPtr>& profiles);
+
 
     // 响应删除几何体的请求
     void onDeleteShapeRequested(const cad_core::ShapePtr& shape);
@@ -357,7 +362,9 @@ private:
     std::map<cad_sketch::SketchPtr, std::vector<Handle(AIS_Shape)>> m_displayedSketches;
     std::map<void*, Handle(AIS_InteractiveObject)> m_displayedObjects;
 	gp_Pln m_lastSketchPlane; // Last sketch plane used
+
     SweepFeatureDialog* m_currentSweepDialog = nullptr;
+    LoftFeatureDialog* m_currentLoftDialog = nullptr;
 
     void CreateTitleBar();
     

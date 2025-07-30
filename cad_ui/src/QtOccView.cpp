@@ -651,6 +651,7 @@ void QtOccView::HandleSelection(const QPoint& point) {
                                 qDebug() << "Added edge to selection, total edges:" << m_selectedEdges.size() 
                                         << "Parent shape found:" << (parentShape ? "Yes" : "No");
                                 HighlightEdge(edge);
+                                
                             } else {
                                 qDebug() << "Edge already selected";
                             }

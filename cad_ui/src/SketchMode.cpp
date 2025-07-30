@@ -651,7 +651,7 @@ void SketchMode::OnCircleCreated(const cad_sketch::SketchCirclePtr& circle) {
     emit sketchElementCreated(circle);
 
     emit statusMessageChanged("创建了圆形");
-    qDebug() << "Added circle to sketch";
+    qDebug() << "Added circle to sketch"; 
 }
 
 void SketchMode::UpdateCirclePreview(const cad_sketch::SketchCirclePtr& previewCircle) {
@@ -822,6 +822,7 @@ gp_Pln SketchMode::ExtractPlaneFromFace(const TopoDS_Face& face) {
 
 // 将 SketchLine 转换为 TopoDS_Edge
 TopoDS_Edge SketchMode::ConvertLineToEdge(const cad_sketch::SketchLinePtr& line) const {
+
     // 获取2D草图坐标系中的点
     const auto& p1_2d = line->GetStartPoint()->GetPoint().GetOCCTPoint();
     const auto& p2_2d = line->GetEndPoint()->GetPoint().GetOCCTPoint();

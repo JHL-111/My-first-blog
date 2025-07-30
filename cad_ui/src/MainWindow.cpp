@@ -16,6 +16,7 @@
 #include "cad_core/SelectionManager.h"
 #include "cad_feature/ExtrudeFeature.h"
 #include "cad_feature/SweepFeature.h"
+#include "cad_feature/LoftFeature.h"
 #include <TopoDS.hxx>
 
 #include <QApplication>
@@ -552,7 +553,14 @@ void MainWindow::CreateToolBars() {
     sweepBtn->setDefaultAction(m_createSweepAction);
     sweepBtn->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
     featuresButtonsLayout->addWidget(sweepBtn);
-    
+
+    QToolButton* loftBtn = new QToolButton();
+    loftBtn->setDefaultAction(m_createLoftAction);
+    loftBtn->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+    featuresButtonsLayout->addWidget(loftBtn);
+
+
+
     featuresLayout->addLayout(featuresButtonsLayout);
     designLayout->addWidget(featuresFrame);
     
@@ -825,6 +833,8 @@ void MainWindow::ConnectSignals() {
     connect(m_createTorusAction, &QAction::triggered, this, &MainWindow::OnCreateTorus);
     connect(m_createExtrudeAction, &QAction::triggered, this, &MainWindow::OnCreateExtrude);
     connect(m_createSweepAction, &QAction::triggered, this, &MainWindow::OnCreateSweep);
+    connect(m_createLoftAction, &QAction::triggered, this, &MainWindow::OnCreateLoft);
+    
 
     // Boolean actions
     connect(m_booleanUnionAction, &QAction::triggered, this, &MainWindow::OnBooleanUnion);
@@ -860,6 +870,7 @@ void MainWindow::ConnectSignals() {
     connect(m_viewer, &QtOccView::ShapeSelected, this, &MainWindow::OnShapeSelected);
     connect(m_viewer, &QtOccView::ViewChanged, this, &MainWindow::OnViewChanged);
     connect(m_viewer, &QtOccView::FaceSelected, this, &MainWindow::OnFaceSelected);
+
 
     connect(m_viewer, &QtOccView::SketchModeEntered, this, [this]() {
         if (m_viewer && m_viewer->GetSketchMode()) {
@@ -1425,7 +1436,31 @@ void MainWindow::OnCreateSweep() {
 
 
 void MainWindow::OnCreateLoft() {
-    QMessageBox::information(this, "Create Loft", "Loft feature creation not implemented yet");
+    if (m_documentTree->GetSketchCount() < 2) {
+        QMessageBox::warning(this, "放样错误",
+            "没有足够的可用于放样的草图。\n\n"
+            "请确保您已经创建并完成了至少两个截面草图。");
+        return;
+    }
+
+    if (m_currentLoftDialog) {
+        m_currentLoftDialog->raise();
+        m_currentLoftDialog->activateWindow();
+        return;
+    }
+
+    m_currentLoftDialog = new LoftFeatureDialog(this);
+
+    connect(m_currentLoftDialog, &LoftFeatureDialog::operationRequested,
+        this, &MainWindow::OnLoftOperationRequested);
+    connect(m_currentLoftDialog, &LoftFeatureDialog::selectionModeChanged,
+        this, &MainWindow::OnSelectionModeChanged);
+    connect(m_currentLoftDialog, &QDialog::finished, this, [this](int result) {
+        m_currentLoftDialog->deleteLater();
+        m_currentLoftDialog = nullptr;
+        });
+
+    m_currentLoftDialog->show();
 }
 
 void MainWindow::OnImportSTEP() {
@@ -1829,35 +1864,38 @@ void MainWindow::OnSelectionModeChanged(bool enabled, const QString& prompt) {
     if (enabled) {
         // Enable 3D selection mode
         statusBar()->showMessage(prompt);
-        
+
         // Determine selection mode based on active dialog
         if (m_currentFilletChamferDialog) {
             // For fillet/chamfer operations, switch to edge selection mode
             m_viewer->SetSelectionMode(2); // Edge mode (OpenCASCADE mode 2)
             m_viewer->ClearEdgeSelection(); // Clear previous edge selections
-            
+
             // Update combo box selection
             if (m_selectionModeCombo) {
                 m_selectionModeCombo->setCurrentIndex(2); // Edge mode
             }
-        } else if (m_currentBooleanDialog) {
+        }
+        else if (m_currentBooleanDialog) {
             // For boolean operations, use shape selection mode
             m_viewer->SetSelectionMode(cad_core::SelectionMode::Shape);
-            
-            // Update combo box selection
-            if (m_selectionModeCombo) {
-                m_selectionModeCombo->setCurrentIndex(0); // Shape mode
-            }
-        } else {
-            // Default to shape selection
-            m_viewer->SetSelectionMode(cad_core::SelectionMode::Shape);
-            
+
             // Update combo box selection
             if (m_selectionModeCombo) {
                 m_selectionModeCombo->setCurrentIndex(0); // Shape mode
             }
         }
-    } else {
+        else {
+            // Default to shape selection
+            m_viewer->SetSelectionMode(cad_core::SelectionMode::Shape);
+
+            // Update combo box selection
+            if (m_selectionModeCombo) {
+                m_selectionModeCombo->setCurrentIndex(0); // Shape mode
+            }
+        }
+    }
+    else {
         // Disable selection mode
         statusBar()->showMessage("Ready");
         // Return to default shape selection mode
@@ -2444,10 +2482,13 @@ void MainWindow::OnSketchModeExited() {
     qDebug() << "Sketch mode exited, UI updated";
 }
 
-// 这个函数是“桥梁”，负责将文档树的选择事件传递给当前打开的扫掠对话框
+// 将文档树的选择事件传递
 void MainWindow::onSketchSelectedFromTree(const cad_sketch::SketchPtr& sketch) {
     if (m_currentSweepDialog) {
         m_currentSweepDialog->onSketchSelected(sketch);
+    }
+    else if (m_currentLoftDialog) {
+        m_currentLoftDialog->onSketchSelected(sketch);
     }
 }
 
@@ -2593,6 +2634,45 @@ void MainWindow::onVisibilityToggled(const QVariant& itemData)
         m_viewer->GetView()->Redraw(); // 统一重绘
 
         m_documentTree->setItemVisibilityState(itemData, isNowVisible);
+    }
+}
+
+void MainWindow::OnLoftOperationRequested(const std::vector<cad_sketch::SketchPtr>& profiles) {
+    if (profiles.size() < 2) {
+        return;
+    }
+
+    // 1. 创建并设置放样特征
+    auto loftFeature = std::make_shared<cad_feature::LoftFeature>("Loft_01");
+    for (const auto& profile : profiles) {
+        loftFeature->AddSection(profile);
+    }
+
+    // 2. "注册"到特征管理器和文档树
+    m_featureManager->AddFeature(loftFeature);
+    m_documentTree->AddFeature(loftFeature);
+
+    // 3. 执行特征，创建三维模型
+    cad_core::ShapePtr resultShape = loftFeature->CreateShape();
+
+    // 4. 检查结果并更新UI
+    if (resultShape && resultShape->IsValid()) {
+        m_ocafManager->StartTransaction("Create Loft");
+        m_ocafManager->AddShape(resultShape, "LoftResult");
+        m_ocafManager->CommitTransaction();
+
+        m_viewer->DisplayShape(resultShape);
+        m_documentTree->AddShape(resultShape);
+        m_viewer->FitAll();
+
+        SetDocumentModified(true);
+        UpdateActions();
+    }
+    else {
+        QMessageBox::critical(this, "创建失败", "无法创建放样特征，请检查您的草图是否有效。");
+        // 如果失败，从UI上移除无效的特征
+        m_featureManager->RemoveFeature(loftFeature);
+        m_documentTree->RemoveFeature(loftFeature);
     }
 }
 

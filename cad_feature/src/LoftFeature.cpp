@@ -2,9 +2,58 @@
 #include "cad_core/CreateSphereCommand.h"
 #include <BRepOffsetAPI_ThruSections.hxx>
 #include <algorithm>
+#include <BRepBuilderAPI_MakeWire.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
+#include <TopoDS_Wire.hxx>
+#include <TopoDS_Edge.hxx>
+#include <ElSLib.hxx>
+#include "cad_sketch/SketchLine.h"
+#include "cad_sketch/SketchCircle.h"
+#include <Geom_Circle.hxx>
+#include <gp_Ax2.hxx>
+
 
 namespace cad_feature {
 
+TopoDS_Wire ConvertSketchToWire(const cad_sketch::SketchPtr& sketch) {
+    if (!sketch || sketch->IsEmpty()) {
+        return TopoDS_Wire();
+    }
+
+    BRepBuilderAPI_MakeWire wireMaker;
+    const auto& plane = sketch->GetPlane(); // 获取草图所在的3D平面
+
+    for (const auto& elem : sketch->GetElements()) {
+        if (elem->GetType() == cad_sketch::SketchElementType::Line) {
+            auto line = std::static_pointer_cast<cad_sketch::SketchLine>(elem);
+            const auto& p1_2d = line->GetStartPoint()->GetPoint().GetOCCTPoint();
+            const auto& p2_2d = line->GetEndPoint()->GetPoint().GetOCCTPoint();
+
+            // 使用 ElSLib::Value 将2D点转换为3D平面上的点
+            gp_Pnt p1_3d = ElSLib::Value(p1_2d.X(), p1_2d.Y(), plane);
+            gp_Pnt p2_3d = ElSLib::Value(p2_2d.X(), p2_2d.Y(), plane);
+
+            if (!p1_3d.IsEqual(p2_3d, 1e-7)) {
+                wireMaker.Add(BRepBuilderAPI_MakeEdge(p1_3d, p2_3d).Edge());
+            }
+        }
+        else if (elem->GetType() == cad_sketch::SketchElementType::Circle) {
+            auto circle = std::static_pointer_cast<cad_sketch::SketchCircle>(elem);
+            const auto& center_2d = circle->GetCenter()->GetPoint().GetOCCTPoint();
+            double radius = circle->GetRadius();
+
+            // 同样转换圆心，并使用平面的法线作为圆的轴向
+            gp_Pnt center_3d = ElSLib::Value(center_2d.X(), center_2d.Y(), plane);
+            gp_Ax2 axis(center_3d, plane.Axis().Direction());
+
+            Handle(Geom_Circle) geomCircle = new Geom_Circle(axis, radius);
+            wireMaker.Add(BRepBuilderAPI_MakeEdge(geomCircle).Edge());
+        }
+        // 您可以在这里添加对其他草图元素（如圆弧）的支持
+    }
+    return wireMaker.Wire();
+}
+    
 LoftFeature::LoftFeature() : Feature(FeatureType::Loft, "Loft") {
     SetParameter("solid", 1.0);
     SetParameter("ruled", 0.0);
@@ -134,24 +183,37 @@ cad_core::ShapePtr LoftFeature::LoftSections() const {
     if (!AreSectionsValid() || GetSectionCount() < 2) {
         return nullptr;
     }
-    
+
     try {
-        // In a real implementation, this would:
-        // 1. Convert section sketches to OCCT wires
-        // 2. Optionally convert guide curves to OCCT wires
-        // 3. Use BRepOffsetAPI_ThruSections to create the lofted solid
-        // 4. Apply solid/ruled/closed parameters
-        
-        // For now, return a simple shape as placeholder
-        auto shape = std::make_shared<cad_core::Shape>();
-        
-        // Placeholder: create a simple sphere-like shape
-        // In real implementation, this would properly loft between sections
-        
-        return shape;
-    } catch (...) {
+        // 1. 初始化放样工具，并设置参数
+        BRepOffsetAPI_ThruSections thruSections(GetSolid(), GetRuled(), 1.0e-6);
+
+        // 2. 将所有截面草图转换为OCCT线框并添加到放样工具中
+        for (const auto& sectionSketch : m_sections) {
+            TopoDS_Wire wire = ConvertSketchToWire(sectionSketch);
+            if (!wire.IsNull()) {
+                thruSections.AddWire(wire);
+            }
+            else {
+                // 如果有任何一个截面无效，则放样失败
+                return nullptr;
+            }
+        }
+
+        // 3. 执行放样计算
+        thruSections.Build();
+
+        // 4. 检查计算是否成功，并返回结果
+        if (thruSections.IsDone()) {
+            return std::make_shared<cad_core::Shape>(thruSections.Shape());
+        }
+    }
+    catch (const Standard_Failure& e) {
+        // 捕获并处理OpenCASCADE的异常
         return nullptr;
     }
+
+    return nullptr;
 }
 
 } // namespace cad_feature
