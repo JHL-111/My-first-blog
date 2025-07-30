@@ -16,6 +16,8 @@
 #include <gp_Dir.hxx>  
 #include <gp_Ax3.hxx> 
 #include <TopoDS_Face.hxx>
+#include <ElSLib.hxx>
+#include <qdebug.h>
 
 namespace cad_feature {
 
@@ -99,7 +101,7 @@ bool ExtrudeFeature::ValidateParameters() const {
     }
     
     double distance = GetDistance();
-    if (distance <= 0.0) {
+    if (std::abs(distance) < 1e-9) { // 检查距离是否接近于零
         return false;
     }
     
@@ -131,77 +133,66 @@ cad_core::ShapePtr ExtrudeFeature::ExtrudeSketch() const {
         BRepBuilderAPI_MakeWire wireMaker;
         const auto& elements = m_sketch->GetElements();
 
-        // 处理所有草图元素
+        // 遍历所有草图元素，将它们的2D坐标转换为3D坐标并创建3D边
         for (const auto& elem : elements) {
             if (elem->GetType() == cad_sketch::SketchElementType::Line) {
                 auto sketchLine = std::static_pointer_cast<cad_sketch::SketchLine>(elem);
-                const auto& startPnt = sketchLine->GetStartPoint()->GetPoint().GetOCCTPoint();
-                const auto& endPnt = sketchLine->GetEndPoint()->GetPoint().GetOCCTPoint();
-                TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(startPnt, endPnt).Edge();
-                wireMaker.Add(edge);
+                const auto& p1_2d = sketchLine->GetStartPoint()->GetPoint().GetOCCTPoint();
+                const auto& p2_2d = sketchLine->GetEndPoint()->GetPoint().GetOCCTPoint();
+
+                // 使用 ElSLib::Value 将2D点转换为草图平面上的3D点
+                gp_Pnt p1_3d = ElSLib::Value(p1_2d.X(), p1_2d.Y(), m_sketchPlane);
+                gp_Pnt p2_3d = ElSLib::Value(p2_2d.X(), p2_2d.Y(), m_sketchPlane);
+
+                if (!p1_3d.IsEqual(p2_3d, 1e-7)) {
+                    wireMaker.Add(BRepBuilderAPI_MakeEdge(p1_3d, p2_3d).Edge());
+                }
+
             }
             else if (elem->GetType() == cad_sketch::SketchElementType::Circle) {
-                // 添加圆形处理
                 auto sketchCircle = std::static_pointer_cast<cad_sketch::SketchCircle>(elem);
-                const auto& center = sketchCircle->GetCenter()->GetPoint().GetOCCTPoint();
+                const auto& center_2d = sketchCircle->GetCenter()->GetPoint().GetOCCTPoint();
                 double radius = sketchCircle->GetRadius();
 
-                // 创建圆形边
-                gp_Ax2 axis(center, gp_Dir(0, 0, 1)); // 假设在XY平面
-                Handle(Geom_Circle) geomCircle = new Geom_Circle(axis, radius);
-                TopoDS_Edge circleEdge = BRepBuilderAPI_MakeEdge(geomCircle).Edge();
-                wireMaker.Add(circleEdge);
+                // 将圆心从2D转换为3D
+                gp_Pnt center_3d = ElSLib::Value(center_2d.X(), center_2d.Y(), m_sketchPlane);
+
+                // 使用草图平面的坐标系创建圆
+                gp_Ax2 circle_axis(center_3d, m_sketchPlane.Axis().Direction());
+                Handle(Geom_Circle) geomCircle = new Geom_Circle(circle_axis, radius);
+                wireMaker.Add(BRepBuilderAPI_MakeEdge(geomCircle).Edge());
             }
         }
 
-        // 对于单个圆，直接创建面
-        if (elements.size() == 1 && elements[0]->GetType() == cad_sketch::SketchElementType::Circle) {
-            auto sketchCircle = std::static_pointer_cast<cad_sketch::SketchCircle>(elements[0]);
-            const auto& center = sketchCircle->GetCenter()->GetPoint().GetOCCTPoint();
-            double radius = sketchCircle->GetRadius();
-
-            // 创建圆形线框
-            gp_Ax2 axis(center, gp_Dir(0, 0, 1));
-            Handle(Geom_Circle) geomCircle = new Geom_Circle(axis, radius);
-            TopoDS_Edge circleEdge = BRepBuilderAPI_MakeEdge(geomCircle).Edge();
-            TopoDS_Wire circleWire = BRepBuilderAPI_MakeWire(circleEdge).Wire();
-
-            // 创建圆形面
-            TopoDS_Face circleFace = BRepBuilderAPI_MakeFace(circleWire).Face();
-
-            // 执行拉伸
-            double distance = GetDistance();
-            gp_Vec extrudeVector(0, 0, distance);
-            BRepPrimAPI_MakePrism prismMaker(circleFace, extrudeVector);
-            prismMaker.Build();
-
-            if (prismMaker.IsDone()) {
-                return std::make_shared<cad_core::Shape>(prismMaker.Shape());
-            }
+        TopoDS_Wire sketchWire = wireMaker.Wire();
+        if (sketchWire.IsNull() || sketchWire.Closed() == Standard_False) {
+            // 如果线框无效或未闭合，则无法创建实体
+            return nullptr;
         }
-        else {
-            // 处理多个元素组成的轮廓
-            TopoDS_Wire sketchWire = wireMaker.Wire();
-            if (sketchWire.IsNull()) {
-                return nullptr;
-            }
 
-            TopoDS_Face sketchFace = BRepBuilderAPI_MakeFace(sketchWire).Face();
-            if (sketchFace.IsNull()) {
-                return nullptr;
-            }
-
-            double distance = GetDistance();
-            gp_Vec extrudeVector(0, 0, distance);
-            BRepPrimAPI_MakePrism prismMaker(sketchFace, extrudeVector);
-            prismMaker.Build();
-
-            if (prismMaker.IsDone()) {
-                return std::make_shared<cad_core::Shape>(prismMaker.Shape());
-            }
+        // 从3D线框创建面，这个面现在位于正确的3D位置和方向
+        TopoDS_Face sketchFace = BRepBuilderAPI_MakeFace(sketchWire).Face();
+        if (sketchFace.IsNull()) {
+            return nullptr;
         }
+
+        // 计算拉伸向量，方向应为草图平面的法线方向
+        double distance = GetDistance();
+        gp_Dir extrude_dir = m_sketchPlane.Axis().Direction();
+        gp_Vec extrudeVector = gp_Vec(extrude_dir) * distance;
+
+        // 执行拉伸
+        BRepPrimAPI_MakePrism prismMaker(sketchFace, extrudeVector);
+        prismMaker.Build();
+
+        if (prismMaker.IsDone()) {
+            return std::make_shared<cad_core::Shape>(prismMaker.Shape());
+        }
+
     }
     catch (const Standard_Failure& e) {
+        // 捕获并处理OpenCASCADE的异常
+        qDebug() << "Extrusion failed: " << e.GetMessageString();
         return nullptr;
     }
 

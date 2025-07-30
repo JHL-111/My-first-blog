@@ -1,6 +1,8 @@
 ﻿#include "cad_ui/QtOccView.h"
 #include "cad_ui/SketchMode.h"
-
+#include <gp_Ax1.hxx>      
+#include <gp_Dir.hxx>      
+#include <gp_Pnt.hxx>      
 #include <OpenGl_GraphicDriver.hxx>
 #include <Aspect_Handle.hxx>
 #include <Aspect_DisplayConnection.hxx>
@@ -20,6 +22,10 @@
 #include <TopAbs.hxx>
 #include <Prs3d_LineAspect.hxx>
 #include <Quantity_Color.hxx>
+#include <gp_Trsf.hxx>
+#include <Graphic3d_TransformPers.hxx>
+#include <gp_Trsf.hxx>
+
 
 #ifdef _WIN32
 #include <WNT_Window.hxx>
@@ -65,29 +71,29 @@ bool QtOccView::InitViewer() {
     if (m_isInitialized) {
         return true;
     }
-    
+
     // Ensure widget has a valid window ID
     if (winId() == 0) {
         // Widget not ready yet, defer initialization
         return false;
     }
-    
+
     try {
         // Create graphics driver
         Handle(Aspect_DisplayConnection) displayConnection = new Aspect_DisplayConnection();
         m_driver = new OpenGl_GraphicDriver(displayConnection);
-        
+
         // Create viewer
         m_viewer = new V3d_Viewer(m_driver);
         m_viewer->SetDefaultLights();
         m_viewer->SetLightOn();
-        
+
         // Create interactive context
         m_context = new AIS_InteractiveContext(m_viewer);
-        
+
         // Create view
         m_view = m_viewer->CreateView();
-        
+
         // Create window
 #ifdef _WIN32
         Handle(WNT_Window) window = new WNT_Window(reinterpret_cast<Aspect_Handle>(winId()));
@@ -96,22 +102,22 @@ bool QtOccView::InitViewer() {
 #else
         Handle(Xw_Window) window = new Xw_Window(displayConnection, winId());
 #endif
-        
+
         m_view->SetWindow(window);
-        
+
         // Ensure window is mapped properly
         if (!window->IsMapped()) {
             window->Map();
         }
-        
+
         // Set up view
         m_view->SetBackgroundColor(Quantity_NOC_GRAY30);
-        
+
         // Ensure proper sizing
         window->DoResize();
         m_view->MustBeResized();
         // Note: Trihedron (coordinate axes) will be controlled by ShowAxes() function
-        
+
         // Add ViewCube for navigation (without axis labels to avoid duplication)
         Handle(AIS_ViewCube) viewCube = new AIS_ViewCube();
         viewCube->SetSize(50, Standard_False);
@@ -122,10 +128,10 @@ bool QtOccView::InitViewer() {
         viewCube->SetTransparency(0.1);
         viewCube->SetMaterial(Graphic3d_NOM_PLASTIC);
         m_context->Display(viewCube, Standard_False);
-        
+
         // Set up context
         m_context->SetDisplayMode(AIS_Shaded, Standard_False);
-        
+
         // 设置选中和高亮样式
         // 使用更直接的方法设置高亮颜色
         Handle(Prs3d_Drawer) hilightDrawer = m_context->HighlightStyle(Prs3d_TypeOfHighlight_Selected);
@@ -133,26 +139,27 @@ bool QtOccView::InitViewer() {
             hilightDrawer->SetColor(Quantity_NOC_RED);
             hilightDrawer->SetDisplayMode(1); // Shaded mode
         }
-        
+
         Handle(Prs3d_Drawer) preHilightDrawer = m_context->HighlightStyle(Prs3d_TypeOfHighlight_Dynamic);
         if (!preHilightDrawer.IsNull()) {
             preHilightDrawer->SetColor(Quantity_NOC_ORANGE);
             preHilightDrawer->SetDisplayMode(1); // Shaded mode
         }
-        
+
         // Set up selection manager
         m_selectionManager->SetContext(m_context);
         m_selectionManager->SetView(m_view);
-        
+
         m_isInitialized = true;
-        
+
         // Initial view setup and render
         FitAll();
         ShowAxes(false);  // 默认显示坐标轴
         m_view->Redraw();  // 确保初始渲染
-        
+
         return true;
-    } catch (const Standard_Failure& e) {
+    }
+    catch (const Standard_Failure& e) {
         m_isInitialized = false;
         return false;
     }

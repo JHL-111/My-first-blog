@@ -4,6 +4,7 @@
 #include "cad_ui/AboutDialog.h"
 #include "cad_ui/DocumentTree.h"
 #include "cad_ui/CreatePrimitiveDialog.h"
+#include "cad_ui/SketchMode.h"
 #include "cad_core/CreateBoxCommand.h"
 #include "cad_core/CreateCylinderCommand.h"
 #include "cad_core/CreateSphereCommand.h"
@@ -1228,7 +1229,7 @@ void MainWindow::OnCreateExtrude() {
 
     // 2. 弹出一个对话框，让用户输入拉伸距离
     bool ok;
-    double distance = QInputDialog::getDouble(this, "输入拉伸距离", "距离:", 10.0, 0.1, 1000.0, 2, &ok);
+    double distance = QInputDialog::getDouble(this, "输入拉伸距离", "距离:", 10.0, -1000.0, 1000.0, 2, &ok);
 
     if (!ok) {
         return; // 用户取消了输入
@@ -1238,6 +1239,7 @@ void MainWindow::OnCreateExtrude() {
     auto extrudeFeature = std::make_shared<cad_feature::ExtrudeFeature>();
     extrudeFeature->SetSketch(m_lastCompletedSketch);
     extrudeFeature->SetDistance(distance);
+    extrudeFeature->SetSketchPlane(m_lastSketchPlane);
 
     // 4. 执行特征来创建3D形状
     cad_core::ShapePtr resultShape = extrudeFeature->CreateShape();
@@ -2240,8 +2242,12 @@ void MainWindow::OnExitSketchMode() {
         return;
     }
 
-    // 保存当前草图
+    // 保存当前草图和位置
     m_lastCompletedSketch = m_viewer->GetCurrentSketch();
+
+    if (m_viewer->GetSketchMode()) { 
+        m_lastSketchPlane = m_viewer->GetSketchMode()->GetSketchPlane();
+    }
     m_viewer->ExitSketchMode();
 
     // 如果草图有效，则启用拉伸按钮

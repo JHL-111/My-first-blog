@@ -344,6 +344,7 @@ private:
     QPushButton* m_closeButton;
     
     cad_sketch::SketchPtr m_lastCompletedSketch;
+	gp_Pln m_lastSketchPlane; // Last sketch plane used
     SweepFeatureDialog* m_currentSweepDialog = nullptr;
 
     void CreateTitleBar();

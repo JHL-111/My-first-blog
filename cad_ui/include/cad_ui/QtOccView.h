@@ -104,6 +104,7 @@ public:
     void StartCircleTool();
 
     cad_sketch::SketchPtr GetCurrentSketch() const;
+    class SketchMode* GetSketchMode() const { return m_sketchMode.get(); }
 
 signals:
     void ShapeSelected(const cad_core::ShapePtr& shape);
